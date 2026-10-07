@@ -10,8 +10,8 @@ import pytest
 
 import app as app_module
 import auth
-import bedrock
 import config
+import fal_images
 import providers
 from jobs import runner
 from schemas import BONES, Rig
@@ -63,7 +63,7 @@ def test_render_accepts_a_drawing_without_creating_or_rigging_an_avatar(
     def unexpected_rigger():
         pytest.fail("rendering must not invoke the rigger")
 
-    monkeypatch.setattr(bedrock, "render_sketch", fake_render)
+    monkeypatch.setattr(fal_images, "render_sketch", fake_render)
     monkeypatch.setattr(providers, "get_rigger", unexpected_rigger)
 
     response = client.post(
@@ -77,8 +77,8 @@ def test_render_accepts_a_drawing_without_creating_or_rigging_an_avatar(
     assert job.status == "done"
     assert captured == {
         "image_bytes": DRAWING,
-        "prompt": f"a colorful robot, {bedrock.FULL_BODY_HINT}",
-        "negative_prompt": bedrock.FULL_BODY_NEGATIVE_HINT,
+        "prompt": f"a colorful robot, {fal_images.FULL_BODY_HINT}",
+        "negative_prompt": fal_images.FULL_BODY_NEGATIVE_HINT,
     }
     assert base64.b64decode(job.result["image_base64"]) == RENDERED
     assert set(store.avatars) == avatar_ids
@@ -125,7 +125,7 @@ def test_tpose_uses_the_same_rendered_image_as_rigging(
         return {"image_bytes": POSED, "output_format": "png"}
 
     monkeypatch.setattr(providers, "get_rigger", lambda: CapturingRigger())
-    monkeypatch.setattr(bedrock, "tpose_transform", fake_tpose)
+    monkeypatch.setattr(fal_images, "tpose_transform", fake_tpose)
     monkeypatch.setattr(config, "UPLOAD_DIR", tmp_path)
 
     create_response = client.post(
@@ -162,7 +162,7 @@ def test_render_validates_multipart_input(client, data, message):
 
 
 def test_render_rejects_an_oversized_prompt(client, monkeypatch):
-    monkeypatch.setattr(config, "BEDROCK_MAX_PROMPT_CHARS", 5)
+    monkeypatch.setattr(config, "MAX_PROMPT_CHARS", 5)
 
     response = client.post(
         "/api/renders",
@@ -174,15 +174,15 @@ def test_render_rejects_an_oversized_prompt(client, monkeypatch):
     assert "limit is 5 characters" in response.get_json()["error"]
 
 
-def test_render_job_exposes_only_the_safe_bedrock_error(
+def test_render_job_exposes_only_the_safe_image_error(
         client, monkeypatch):
-    secret = "arn:aws:iam::123456789012:role/RenderRole"
+    secret = "projects/123456789012/locations/us/apiKeys/AIzaSecret"
 
     def fail_render(*args, **kwargs):
-        raise bedrock.BedrockError(
+        raise fal_images.FalError(
             "That couldn't be rendered.", status=403, detail=secret)
 
-    monkeypatch.setattr(bedrock, "render_sketch", fail_render)
+    monkeypatch.setattr(fal_images, "render_sketch", fail_render)
 
     response = client.post(
         "/api/renders",

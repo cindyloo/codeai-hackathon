@@ -112,26 +112,31 @@ including augmentation, and `RIGGING_POLL_INTERVAL` controls mesh/rig status
 polling (default 5 seconds). Other vars: `EPISODE_RATE` (episodes/sec at speed
 1, default 20), `DATA_DIR`, `MAX_UPLOAD_BYTES`.
 
-## Bedrock prompt endpoint
+## Claude prompt endpoint
 
-`POST /api/llm/generate` runs a prompt against a Bedrock model for the teams
+`POST /api/llm/generate` runs a prompt against a Claude model for the teams
 building the real providers. It costs money, so it is **off until configured**
 and returns 404 to anyone without the token.
 
 ```bash
 export LLM_API_TOKEN=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
-export BEDROCK_ALLOWED_MODELS="<model-id>,<model-id>"   # empty = refuse everything
-export AWS_DEFAULT_REGION=eu-west-1
+export CLAUDE_ALLOWED_MODELS="claude-opus-5-5,claude-sonnet-5-5"   # empty = refuse everything
+export ANTHROPIC_API_KEY=sk-ant-...
 
 curl -s localhost:5000/api/llm/generate \
   -H "Authorization: Bearer $LLM_API_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"model_id":"<model-id>","prompt":"Say hello","max_tokens":100}'
+  -d '{"model_id":"claude-sonnet-5-5","prompt":"Say hello","max_tokens":100}'
 ```
 
 `GET /api/llm/models` lists what this deployment allows and your current
-rate-limit usage. Find the model IDs for your account and region with
-`aws bedrock list-inference-profiles --region "$AWS_DEFAULT_REGION"`.
+rate-limit usage.
+
+The sketch render (`POST /api/renders`) and T-pose (`POST
+/api/avatars/<id>/tpose`) features use fal.ai instead — set `FAL_KEY`. Models
+default to FLUX.1 Kontext (`fal-ai/flux-pro/kontext`) for rendering and posing
+and BiRefNet (`fal-ai/birefnet/v2`) for background removal; override with
+`FAL_RENDER_MODEL`, `FAL_TPOSE_MODEL` and `FAL_BG_REMOVAL_MODEL`.
 
 **The token is server-side only — never ship it to the browser.** The frontend
 does not call this endpoint. Details, including the threat model:

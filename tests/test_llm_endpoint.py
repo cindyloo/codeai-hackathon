@@ -1,11 +1,11 @@
-"""Checks that the Bedrock endpoint stays shut.
+"""Checks that the Claude prompt endpoint stays shut.
 
 The failure this suite exists to catch is the endpoint being reachable without
 a token, or reachable with one but willing to invoke an arbitrary model. Both
 would cost money on someone else's account.
 
-No AWS call is made anywhere in here — every test is refused before it would
-reach Bedrock, which is the point.
+No Anthropic API call is made anywhere in here — every test is refused before
+it would reach the API, which is the point.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import pytest
 
 import app as app_module
 import auth
-import bedrock
+import claude
 import config
 
 TOKEN = "test-token-do-not-use-in-production"
@@ -41,7 +41,7 @@ def reset_limiter():
 def enabled(monkeypatch):
     """Endpoint switched on with one allowed model."""
     monkeypatch.setattr(config, "LLM_API_TOKEN", TOKEN)
-    monkeypatch.setattr(config, "BEDROCK_ALLOWED_MODELS", ("test.model-v1",))
+    monkeypatch.setattr(config, "CLAUDE_ALLOWED_MODELS", ("test.model-v1",))
     return {"Authorization": f"Bearer {TOKEN}"}
 
 
@@ -89,13 +89,13 @@ class TestClosedByDefault:
 class TestModelAllowlist:
     def test_empty_allowlist_refuses_everything(self, client, monkeypatch):
         monkeypatch.setattr(config, "LLM_API_TOKEN", TOKEN)
-        monkeypatch.setattr(config, "BEDROCK_ALLOWED_MODELS", ())
+        monkeypatch.setattr(config, "CLAUDE_ALLOWED_MODELS", ())
         response = post(client, headers={"Authorization": f"Bearer {TOKEN}"})
         assert response.status_code == 503
 
     def test_model_outside_the_allowlist_is_refused(self, client, enabled):
         response = post(client, headers=enabled,
-                        model_id="anthropic.something-expensive")
+                        model_id="claude-something-expensive")
         assert response.status_code == 400
         assert "allowed list" in response.get_json()["error"]
 
@@ -104,8 +104,8 @@ class TestModelAllowlist:
         assert response.status_code == 400
 
     def test_check_model_raises_rather_than_returning_false(self):
-        with pytest.raises(bedrock.BedrockError):
-            bedrock.check_model("not-allowed")
+        with pytest.raises(claude.ClaudeError):
+            claude.check_model("not-allowed")
 
 
 class TestInputLimits:
@@ -117,9 +117,9 @@ class TestInputLimits:
         response = post(client, headers=enabled, model_id="")
         assert response.status_code == 400
 
-    def test_oversized_prompt_is_rejected_before_any_aws_call(
+    def test_oversized_prompt_is_rejected_before_any_api_call(
             self, client, enabled, monkeypatch):
-        monkeypatch.setattr(config, "BEDROCK_MAX_PROMPT_CHARS", 100)
+        monkeypatch.setattr(config, "MAX_PROMPT_CHARS", 100)
         response = post(client, headers=enabled, prompt="x" * 101)
         assert response.status_code == 413
 
@@ -159,36 +159,37 @@ class TestRateLimiting:
 
 
 class TestErrorTranslation:
-    def test_invalid_model_identifier_is_reported_as_server_configuration(self):
-        class InvalidModelError(Exception):
-            response = {"Error": {"Code": "ValidationException"}}
+    def test_missing_api_key_fails_closed(self, monkeypatch):
+        pytest.importorskip("anthropic")
+        monkeypatch.setattr(claude, "_client", None)
+        monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "")
+        with pytest.raises(claude.ClaudeError) as excinfo:
+            claude._get_client()
+        assert excinfo.value.status == 503
 
-        translated = bedrock._translate(InvalidModelError(
-            "The provided model identifier is invalid."))
+    def test_rate_limit_is_reported_as_busy(self):
+        anthropic = pytest.importorskip("anthropic")
+        httpx = pytest.importorskip("httpx2")
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        exc = anthropic.RateLimitError(
+            "rate limited", response=httpx.Response(429, request=request),
+            body=None)
 
-        assert translated.status == 503
-        assert "AWS region" in translated.message
+        translated = claude._translate(exc)
 
-    def test_other_validation_errors_still_describe_the_request(self):
-        class InvalidRequestError(Exception):
-            response = {"Error": {"Code": "ValidationException"}}
+        assert translated.status == 429
+        assert "busy" in translated.message
 
-        translated = bedrock._translate(InvalidRequestError(
-            "The request payload is malformed."))
-
-        assert translated.status == 400
-        assert translated.message == "That request wasn't valid for this model."
-
-    def test_aws_detail_is_kept_off_the_wire(self, client, enabled, monkeypatch):
-        """AWS messages name account IDs and ARNs; callers must not see them."""
-        secret = "arn:aws:iam::123456789012:role/SuperSecretRole"
+    def test_api_detail_is_kept_off_the_wire(self, client, enabled, monkeypatch):
+        """Upstream messages can name org IDs and keys; callers must not see them."""
+        secret = "org-123456789012 key sk-ant-...secret"
 
         def boom(*args, **kwargs):
-            raise bedrock.BedrockError(
+            raise claude.ClaudeError(
                 "This server isn't allowed to use that model.",
                 status=403, detail=secret)
 
-        monkeypatch.setattr(bedrock, "converse", boom)
+        monkeypatch.setattr(claude, "converse", boom)
         response = post(client, headers=enabled)
         assert response.status_code == 403
         assert secret not in response.get_data(as_text=True)

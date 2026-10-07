@@ -323,7 +323,7 @@ export const StepSketch = {
           <p class="muted" v-if="!hasDrawing">Draw something
              on the left first.</p>
           <p class="muted" v-else>Sends your line drawing and this prompt to
-             a Bedrock image model. The result becomes your rigged avatar.</p>
+             a fal.ai image model. The result becomes your rigged avatar.</p>
 
           <div v-if="renderBusy" class="progress">
             <div class="progress-bar" :style="{ width: renderPercent + '%' }"></div>

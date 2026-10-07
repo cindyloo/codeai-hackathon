@@ -16,9 +16,10 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
-import bedrock
+import claude
 import config
 import export
+import fal_images
 import gltf
 import providers
 from auth import RateLimiter, limiter, require_token
@@ -227,9 +228,9 @@ def render_sketch():
     prompt = request.form.get("prompt", "").strip()
     if not prompt:
         return fail("Describe how you'd like this rendered.")
-    if len(prompt) > config.BEDROCK_MAX_PROMPT_CHARS:
+    if len(prompt) > config.MAX_PROMPT_CHARS:
         return fail(f"Prompt is too long — the limit is "
-                    f"{config.BEDROCK_MAX_PROMPT_CHARS} characters.", 413)
+                    f"{config.MAX_PROMPT_CHARS} characters.", 413)
 
     refusal = render_limiter.check(request.remote_addr or "unknown")
     if refusal:
@@ -239,10 +240,10 @@ def render_sketch():
         try:
             # Rigging and the later T-pose transform both consume this render,
             # so a close-up here cannot be recovered downstream.
-            result = bedrock.render_sketch(
-                image_bytes, f"{prompt}, {bedrock.FULL_BODY_HINT}",
-                negative_prompt=bedrock.FULL_BODY_NEGATIVE_HINT)
-        except bedrock.BedrockError as exc:
+            result = fal_images.render_sketch(
+                image_bytes, f"{prompt}, {fal_images.FULL_BODY_HINT}",
+                negative_prompt=fal_images.FULL_BODY_NEGATIVE_HINT)
+        except fal_images.FalError as exc:
             raise ProviderError(exc.message, detail=exc.detail) from exc
         return {
             "image_base64": base64.b64encode(result["image_bytes"]).decode("ascii"),
@@ -257,7 +258,7 @@ def render_sketch():
 @app.post("/api/avatars/<avatar_id>/tpose")
 def tpose_avatar(avatar_id: str):
     """Turn the avatar into a forward-facing, T-pose, transparent-background
-    PNG, via bedrock.tpose_transform. Fixed shape, no request body — always
+    PNG, via fal_images.tpose_transform. Fixed shape, no request body — always
     the same transform. The avatar image is the rendered PNG that was supplied
     to rigging, so both downstream operations use the same character design."""
     avatar = store.get_avatar(avatar_id)
@@ -272,8 +273,8 @@ def tpose_avatar(avatar_id: str):
 
     def work(progress):
         try:
-            result = bedrock.tpose_transform(image_bytes)
-        except bedrock.BedrockError as exc:
+            result = fal_images.tpose_transform(image_bytes)
+        except fal_images.FalError as exc:
             raise ProviderError(exc.message, detail=exc.detail) from exc
         return {
             "image_base64": base64.b64encode(result["image_bytes"]).decode("ascii"),
@@ -576,11 +577,11 @@ def llm_animator_generate():
 
 
 # --------------------------------------------------------------------------
-# Bedrock prompt endpoint
+# Claude prompt endpoint
 #
 # A utility for the teams building the real providers: run a prompt against a
-# Bedrock model and see what comes back. Guarded by a bearer token, a model
-# allowlist and rate limits — see auth.py and bedrock.py.
+# Claude model and see what comes back. Guarded by a bearer token, a model
+# allowlist and rate limits — see auth.py and claude.py.
 #
 # NOT called by the frontend, and the token must never be shipped to the
 # browser: anything the browser holds is public, and this endpoint spends money.
@@ -594,9 +595,9 @@ def llm_generate():
     prompt = (body.get("prompt") or "").strip()
     if not prompt:
         return fail("A 'prompt' is required.")
-    if len(prompt) > config.BEDROCK_MAX_PROMPT_CHARS:
+    if len(prompt) > config.MAX_PROMPT_CHARS:
         return fail(f"Prompt is too long — the limit is "
-                    f"{config.BEDROCK_MAX_PROMPT_CHARS} characters.", 413)
+                    f"{config.MAX_PROMPT_CHARS} characters.", 413)
 
     model_id = (body.get("model_id") or "").strip()
     if not model_id:
@@ -604,18 +605,18 @@ def llm_generate():
                     "ones this server allows.")
 
     system = (body.get("system") or "").strip() or None
-    if system and len(system) > config.BEDROCK_MAX_PROMPT_CHARS:
+    if system and len(system) > config.MAX_PROMPT_CHARS:
         return fail("System prompt is too long.", 413)
 
     try:
         temperature = body.get("temperature")
-        result = bedrock.converse(
+        result = claude.converse(
             model_id, prompt,
             system=system,
             max_tokens=int(body.get("max_tokens", 1024)),
             temperature=None if temperature is None else float(temperature),
         )
-    except bedrock.BedrockError as exc:
+    except claude.ClaudeError as exc:
         return fail(exc.message, exc.status)
     except (TypeError, ValueError) as exc:
         return fail(f"Invalid request: {exc}", 400)
@@ -628,12 +629,11 @@ def llm_generate():
 def llm_models():
     """What this deployment will actually run, plus current rate-limit usage."""
     return jsonify({
-        "models": bedrock.allowed_models(),
-        "region": config.BEDROCK_REGION or None,
+        "models": claude.allowed_models(),
         "limits": {
             **limiter.snapshot(),
-            "max_tokens": config.BEDROCK_MAX_TOKENS,
-            "max_prompt_chars": config.BEDROCK_MAX_PROMPT_CHARS,
+            "max_tokens": config.CLAUDE_MAX_TOKENS,
+            "max_prompt_chars": config.MAX_PROMPT_CHARS,
         },
     })
 

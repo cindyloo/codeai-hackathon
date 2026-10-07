@@ -62,7 +62,33 @@ PROVIDER_TIMEOUT = float(os.environ.get("PROVIDER_TIMEOUT", "120"))
 
 
 # --------------------------------------------------------------------------
-# Bedrock prompt endpoint
+# Real poser: LLM code-generation fallback (providers/real/posing.py)
+# --------------------------------------------------------------------------
+# The static keyword library (pose_library.py) handles common prompts for
+# free; this only engages for everything else. An unset key disables the LLM
+# path entirely — RealPoser falls back to the same deterministic hash-pose
+# the mock uses, so the app (and the contract test suite, which instantiates
+# RealPoser with no config) still works with zero setup.
+
+#: OpenRouter API key. Empty disables the LLM fallback path entirely.
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
+
+#: OpenRouter's OpenAI-compatible endpoint.
+OPENROUTER_BASE_URL = os.environ.get(
+    "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").strip()
+
+#: Model id to request. See https://openrouter.ai/models for the catalogue.
+OPENROUTER_MODEL = os.environ.get(
+    "OPENROUTER_MODEL", "anthropic/claude-sonnet-5").strip()
+
+#: Attempts given to the LLM before falling back to the hash pose: the first
+#: try plus this many retries, each fed the previous attempt's validation
+#: error so the model can fix it.
+POSER_LLM_RETRIES = int(os.environ.get("POSER_LLM_RETRIES", "2"))
+
+
+# --------------------------------------------------------------------------
+# Claude prompt endpoint
 # --------------------------------------------------------------------------
 # Every default here is the locked-down one. The endpoint stays switched off
 # and refuses every model until someone deliberately configures both.
@@ -71,29 +97,26 @@ PROVIDER_TIMEOUT = float(os.environ.get("PROVIDER_TIMEOUT", "120"))
 #: This is a server-side secret — it must never be sent to the browser.
 LLM_API_TOKEN = os.environ.get("LLM_API_TOKEN", "").strip()
 
-#: Comma-separated Bedrock model IDs the endpoint may invoke. Empty refuses
+#: Anthropic API key. Unset means every Claude call fails closed with a 503.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+
+#: Comma-separated Claude model IDs the endpoint may invoke. Empty refuses
 #: everything, so a misconfigured deployment cannot be pointed at an
-#: expensive model. Find the exact IDs for your account and region with:
-#:   aws bedrock list-inference-profiles --region <region>
-#:   aws bedrock list-foundation-models  --region <region>
-BEDROCK_ALLOWED_MODELS = tuple(
-    m.strip() for m in os.environ.get("BEDROCK_ALLOWED_MODELS", "").split(",")
+#: expensive model. e.g. "claude-opus-5-5,claude-sonnet-5-5,claude-haiku-4-5".
+CLAUDE_ALLOWED_MODELS = tuple(
+    m.strip() for m in os.environ.get("CLAUDE_ALLOWED_MODELS", "").split(",")
     if m.strip()
 )
 
-#: boto3 reads AWS_DEFAULT_REGION itself; BEDROCK_REGION overrides it when
-#: Bedrock lives somewhere other than the rest of the account's resources.
-BEDROCK_REGION = (os.environ.get("BEDROCK_REGION")
-                  or os.environ.get("AWS_DEFAULT_REGION", ""))
-
 #: Ceiling on max_tokens, whatever the caller asks for.
-BEDROCK_MAX_TOKENS = int(os.environ.get("BEDROCK_MAX_TOKENS", "4096"))
-
-#: Longest prompt accepted, in characters.
-BEDROCK_MAX_PROMPT_CHARS = int(os.environ.get("BEDROCK_MAX_PROMPT_CHARS", "20000"))
+CLAUDE_MAX_TOKENS = int(os.environ.get("CLAUDE_MAX_TOKENS", "4096"))
 
 #: Seconds to wait for a model response.
-BEDROCK_TIMEOUT = float(os.environ.get("BEDROCK_TIMEOUT", "60"))
+CLAUDE_TIMEOUT = float(os.environ.get("CLAUDE_TIMEOUT", "60"))
+
+#: Longest prompt accepted, in characters — by the prompt endpoint and the
+#: sketch-render feature alike.
+MAX_PROMPT_CHARS = int(os.environ.get("MAX_PROMPT_CHARS", "20000"))
 
 #: Per-caller and whole-deployment request caps. The daily one bounds the bill.
 LLM_RATE_PER_MINUTE = int(os.environ.get("LLM_RATE_PER_MINUTE", "10"))
@@ -101,52 +124,42 @@ LLM_RATE_PER_DAY = int(os.environ.get("LLM_RATE_PER_DAY", "500"))
 
 
 # --------------------------------------------------------------------------
-# Sketch-render feature (POST /api/renders)
+# fal.ai image features (POST /api/renders, POST /api/avatars/<id>/tpose)
 # --------------------------------------------------------------------------
-# A purpose-built, browser-facing endpoint — unlike the prompt endpoint above,
-# the frontend is meant to call this one. It takes a fixed shape (an uploaded
-# drawing plus a short prompt) and always invokes the same model, so
-# there's no caller-selectable model_id and therefore no allowlist. It still
-# shares BEDROCK_REGION/AWS credentials and fails closed the same way: no
-# region configured means bedrock._get_client() refuses before anything runs.
+# Purpose-built, browser-facing endpoints — unlike the prompt endpoint above,
+# the frontend is meant to call these. They take a fixed shape and always
+# invoke the same models, so there's no caller-selectable model and therefore
+# no allowlist. They fail closed the same way: no FAL_KEY means
+# fal_images._get_client() refuses before anything runs.
 
-#: Stability's Control Sketch service — image-conditioned, so the drawing's
-#: lines actually shape the output rather than just informing a text prompt.
-BEDROCK_RENDER_MODEL_ID = os.environ.get(
-    "BEDROCK_RENDER_MODEL_ID", "us.stability.stable-image-control-sketch-v1:0")
+#: fal.ai API key (https://fal.ai/dashboard/keys).
+FAL_KEY = os.environ.get("FAL_KEY", "").strip()
 
-#: This endpoint has no bearer token — every visitor's browser can reach it,
-#: like the rest of the avatar API — so it needs its own caps to bound the
-#: bill. Tighter than LLM_RATE_PER_* because image generation costs more per
-#: call than a short text completion.
+#: Image editor for the free-text sketch render: takes the drawing as a
+#: reference image plus an instruction.
+FAL_RENDER_MODEL = os.environ.get(
+    "FAL_RENDER_MODEL", "fal-ai/flux-pro/kontext").strip()
+
+#: Image editor for the T-pose redraw (stage 1). A separate setting so the
+#: two features can diverge later.
+FAL_TPOSE_MODEL = os.environ.get(
+    "FAL_TPOSE_MODEL", "fal-ai/flux-pro/kontext").strip()
+
+#: Background removal for the T-pose (stage 2), returning a PNG with a real
+#: alpha channel.
+FAL_BG_REMOVAL_MODEL = os.environ.get(
+    "FAL_BG_REMOVAL_MODEL", "fal-ai/birefnet/v2").strip()
+
+#: Seconds to wait for each fal call, queue time included.
+FAL_TIMEOUT = float(os.environ.get("FAL_TIMEOUT", "120"))
+
+#: These endpoints have no bearer token — every visitor's browser can reach
+#: them, like the rest of the avatar API — so they need their own caps to
+#: bound the bill. Tighter than LLM_RATE_PER_* because image generation costs
+#: more per call than a short text completion; T-pose is tighter still since
+#: each request is two fal calls.
 RENDER_RATE_PER_MINUTE = int(os.environ.get("RENDER_RATE_PER_MINUTE", "5"))
 RENDER_RATE_PER_DAY = int(os.environ.get("RENDER_RATE_PER_DAY", "50"))
-
-
-# --------------------------------------------------------------------------
-# T-pose feature (POST /api/avatars/<id>/tpose)
-# --------------------------------------------------------------------------
-# Also browser-facing and also fixed-shape (an avatar's saved drawing, no
-# caller input), but always two Bedrock calls: a pose transform, then a
-# background removal. Its own model ids so each stage can be retuned or
-# swapped without touching the free-text render feature above.
-
-#: Stage 1 — redraws the avatar in a forward-facing T-pose. Same Stability
-#: Control Sketch service as BEDROCK_RENDER_MODEL_ID, kept as a separate
-#: setting since the two features may want to diverge later.
-BEDROCK_TPOSE_MODEL_ID = os.environ.get(
-    "BEDROCK_TPOSE_MODEL_ID", "us.stability.stable-image-control-sketch-v1:0")
-
-#: Stage 2 — strips the background, returning a PNG with a real alpha
-#: channel. Stability's own Remove Background service, invoked the same way
-#: as BEDROCK_TPOSE_MODEL_ID. (Amazon Nova Canvas can also do this, but isn't
-#: available in every account/region — Stability's version is used here
-#: since it's already required for stage 1.)
-BEDROCK_BG_REMOVAL_MODEL_ID = os.environ.get(
-    "BEDROCK_BG_REMOVAL_MODEL_ID", "us.stability.stable-image-remove-background-v1:0")
-
-#: Tighter than RENDER_RATE_PER_* since each call here is two Bedrock
-#: invocations rather than one.
 TPOSE_RATE_PER_MINUTE = int(os.environ.get("TPOSE_RATE_PER_MINUTE", "3"))
 TPOSE_RATE_PER_DAY = int(os.environ.get("TPOSE_RATE_PER_DAY", "30"))
 

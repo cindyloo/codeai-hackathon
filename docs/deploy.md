@@ -121,7 +121,7 @@ doubt.
 Locally, copy `.env.example` to `.env`. On Heroku use config vars:
 
 ```bash
-heroku config:set PROVIDER_POSING=real AWS_DEFAULT_REGION=eu-west-1
+heroku config:set PROVIDER_POSING=real FAL_KEY=...
 heroku config                                  # what is currently set
 ```
 
@@ -142,29 +142,26 @@ slug.
 | `EPISODE_RATE` | `20` | episodes/sec at speed 1; higher means more work per trainee |
 | `DATA_DIR` | `./data` | upload location |
 | `MAX_UPLOAD_BYTES` | `8388608` | 8MB |
-| `AWS_DEFAULT_REGION` | — | read by boto3, not by this repo |
-| `AWS_ACCESS_KEY_ID` | — | " |
-| `AWS_SECRET_ACCESS_KEY` | — | " |
-| `AWS_SESSION_TOKEN` | — | temporary credentials only; omit for long-lived IAM keys |
-| `LLM_API_TOKEN` | — | **unset = the Bedrock endpoint returns 404.** Server-side only |
-| `BEDROCK_ALLOWED_MODELS` | — | comma-separated; **empty = every model refused** |
-| `BEDROCK_REGION` | `AWS_DEFAULT_REGION` | only if Bedrock is elsewhere |
-| `BEDROCK_MAX_TOKENS` | `4096` | ceiling whatever the caller asks for |
-| `BEDROCK_MAX_PROMPT_CHARS` | `20000` | prompt size limit |
+| `ANTHROPIC_API_KEY` | — | Claude prompt endpoint; unset = it fails closed with a 503 |
+| `LLM_API_TOKEN` | — | **unset = the Claude endpoint returns 404.** Server-side only |
+| `CLAUDE_ALLOWED_MODELS` | — | comma-separated; **empty = every model refused** |
+| `CLAUDE_MAX_TOKENS` | `4096` | ceiling whatever the caller asks for |
+| `CLAUDE_TIMEOUT` | `60` | seconds |
+| `MAX_PROMPT_CHARS` | `20000` | prompt size limit (prompt endpoint and sketch render) |
+| `FAL_KEY` | — | sketch render + T-pose; unset = both return 503 |
+| `FAL_RENDER_MODEL` | `fal-ai/flux-pro/kontext` | sketch render |
+| `FAL_TPOSE_MODEL` | `fal-ai/flux-pro/kontext` | T-pose redraw |
+| `FAL_BG_REMOVAL_MODEL` | `fal-ai/birefnet/v2` | T-pose background removal |
+| `FAL_TIMEOUT` | `120` | seconds per fal call, queue time included |
 | `LLM_RATE_PER_MINUTE` | `10` | per caller |
 | `LLM_RATE_PER_DAY` | `500` | whole deployment — this bounds the bill |
 | `PORT` | — | set by Heroku |
 
-The Bedrock prompt endpoint is off unless `LLM_API_TOKEN` **and**
-`BEDROCK_ALLOWED_MODELS` are both set — see [llm-endpoint.md](llm-endpoint.md).
+The Claude prompt endpoint is off unless `LLM_API_TOKEN` **and**
+`CLAUDE_ALLOWED_MODELS` are both set — see [llm-endpoint.md](llm-endpoint.md).
 Its rate limits are per-process and in memory, which is sound on one dyno and
 would need Redis if that ever changes.
 
-The AWS variables need no code here — boto3 reads them from the environment
-itself. `.env` is loaded at `config` import, which happens before any provider
-or Bedrock client is constructed, so anything creating a boto3 client at import
-time still sees them.
-
-`boto3` is in `requirements.txt` for the Bedrock endpoint. The client is built
-lazily on first use, so the app starts and serves the avatar experience fine on
-a machine with no AWS credentials at all.
+`anthropic` and `fal-client` are in `requirements.txt`. Both model
+clients are built lazily on first use, so the app starts and serves the avatar
+experience fine on a machine with neither key set.
