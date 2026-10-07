@@ -32,6 +32,8 @@ _PENDING_STATUSES = {
 _SUCCESS_STATUSES = {"complete", "completed", "done", "ok", "success", "succeeded"}
 _FAILED_STATUSES = {"cancelled", "canceled", "error", "failed", "failure"}
 _HUMANOID_LABELS = {"biped", "human", "humanoid", "person"}
+_ANIMAL_LABELS = {"animal", "dog", "cat"}
+_VEHICLE_LABELS = {"car", "truck", "bike","automobile", "van"}
 
 # The rigging service uses semantic joint names but the Teach contract has its
 # own stable vocabulary. Matching is normalized for case and separator style;
@@ -253,11 +255,11 @@ class RealRigger(Rigger):
             "POST", "/classify", deadline,
             raw_body=image_bytes, content_type=mime)
         label = self._classification_label(classification)
-        if label not in _HUMANOID_LABELS:
+        if label not in _HUMANOID_LABELS and label not in _ANIMAL_LABELS and label not in _VEHICLE_LABELS:
             raise ProviderError(
-                "I can only wake up drawings of people right now. Try drawing "
-                "a person with a head, two arms, and two legs!",
-                detail=f"non-humanoid classification: {label!r}")
+                "I can only wake up drawings of people, animals, and vehicles right now. Try drawing "
+                "a person, animal with a head, two arms, and two legs. Or, draw a car from the side",
+                detail=f"unrecognized classification: {label!r}")
 
         classify_id = self._find_value(classification, "classify_id")
         if not isinstance(classify_id, (str, int)) or isinstance(classify_id, bool):

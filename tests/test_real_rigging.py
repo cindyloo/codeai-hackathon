@@ -270,15 +270,25 @@ def test_async_mesh_and_rig_tasks_are_polled():
 
 
 @pytest.mark.parametrize("response", [
-    {"classification": "car"},
-    {"result": {"category": "animal"}},
+    {"classification": "tree"},
+    {"result": {"category": "building"}},
     {"is_humanoid": False},
 ])
-def test_non_humanoids_get_a_child_safe_error(response):
+def test_unsupported_drawings_get_a_child_safe_error(response):
     rigger, _ = rigger_with([("/classify", response)])
-    with pytest.raises(ProviderError, match="non-humanoid classification") as caught:
+    with pytest.raises(ProviderError, match="unrecognized classification") as caught:
         rigger.rig(b"png", "image/png", lambda *_: None)
-    assert "drawings of people" in caught.value.user_message
+    assert "people, animals, and vehicles" in caught.value.user_message
+
+
+@pytest.mark.parametrize("label", ["car", "dog", "animal"])
+def test_animals_and_vehicles_get_past_classification(label):
+    # No classify_id in the response, so rigging stops at the next check —
+    # past the label gate.
+    rigger, _ = rigger_with([("/classify", {"classification": label})])
+    with pytest.raises(ProviderError) as caught:
+        rigger.rig(b"png", "image/png", lambda *_: None)
+    assert "unrecognized classification" not in caught.value.detail
 
 
 def test_malformed_json_is_reported_as_provider_error():
