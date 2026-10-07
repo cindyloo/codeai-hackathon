@@ -156,8 +156,11 @@ FAL_TPOSE_MODEL = os.environ.get(
 FAL_BG_REMOVAL_MODEL = os.environ.get(
     "FAL_BG_REMOVAL_MODEL", "fal-ai/birefnet/v2").strip()
 
-#: Seconds to wait for each fal call, queue time included.
-FAL_TIMEOUT = float(os.environ.get("FAL_TIMEOUT", "120"))
+#: Seconds to wait for each fal call, queue time included. Long enough for a
+#: cold start: a less popular model (the "lines" render's
+#: ControlNet) can sit in fal's queue for well over a minute while a GPU
+#: spins up, then generates in seconds.
+FAL_TIMEOUT = float(os.environ.get("FAL_TIMEOUT", "240"))
 
 #: These endpoints have no bearer token — every visitor's browser can reach
 #: them, like the rest of the avatar API — so they need their own caps to

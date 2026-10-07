@@ -153,7 +153,7 @@ slug.
 | `FAL_RENDER_MODEL` | `fal-ai/flux-pro/kontext` | sketch render, "Cartoon animation" |
 | `FAL_TPOSE_MODEL` | `fal-ai/flux-pro/kontext` | T-pose redraw |
 | `FAL_BG_REMOVAL_MODEL` | `fal-ai/birefnet/v2` | T-pose background removal |
-| `FAL_TIMEOUT` | `120` | seconds per fal call, queue time included |
+| `FAL_TIMEOUT` | `240` | seconds per fal call, queue time included (cold starts can exceed a minute) |
 | `LLM_RATE_PER_MINUTE` | `10` | per caller |
 | `LLM_RATE_PER_DAY` | `500` | whole deployment — this bounds the bill |
 | `PORT` | — | set by Heroku |

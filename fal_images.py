@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import base64
 import threading
+import time
+from collections.abc import Callable
 
 import config
 from logs import log
@@ -77,11 +79,35 @@ def _data_uri(image_bytes: bytes) -> str:
     return f"data:{mime};base64,{base64.b64encode(image_bytes).decode('ascii')}"
 
 
-def _call(model_id: str, arguments: dict) -> dict:
+#: Seconds a request may sit in fal's queue before it counts as a cold start
+#: (fal spinning up a GPU and loading the model, which can take a minute or
+#: more for less popular models). A warm model starts within a second or two.
+_SLOW_START_AFTER = 5.0
+
+
+def _call(model_id: str, arguments: dict, *,
+          on_slow_start: Callable[[], None] | None = None) -> dict:
+    """Run a model. ``on_slow_start`` is called once if it is still queued
+    after ``_SLOW_START_AFTER`` seconds."""
     client = _get_client()
+    on_queue_update = None
+    if on_slow_start is not None:
+        import fal_client
+
+        started = time.monotonic()
+        notified = False
+
+        def on_queue_update(status) -> None:
+            nonlocal notified
+            if (not notified and isinstance(status, fal_client.Queued)
+                    and time.monotonic() - started >= _SLOW_START_AFTER):
+                notified = True
+                on_slow_start()
+
     try:
         return client.subscribe(model_id, arguments,
-                                client_timeout=config.FAL_TIMEOUT)
+                                client_timeout=config.FAL_TIMEOUT,
+                                on_queue_update=on_queue_update)
     except Exception as exc:  # noqa: BLE001 - translated below
         raise _translate(exc) from exc
 
@@ -108,12 +134,13 @@ def _fetch(image: dict | None) -> bytes:
 
 
 def _edit_image(image_bytes: bytes, instruction: str, *, model_id: str,
-                seed: int = 0) -> dict:
+                seed: int = 0,
+                on_slow_start: Callable[[], None] | None = None) -> dict:
     """Send one image plus an instruction; return the first image back."""
     return _generate(model_id, {
         "prompt": instruction,
         "image_url": _data_uri(image_bytes),
-    }, seed=seed)
+    }, seed=seed, on_slow_start=on_slow_start)
 
 
 #: How strictly the "lines" render follows the drawing's edges (fal's default
@@ -122,7 +149,8 @@ _LINES_CONTROL_STRENGTH = 1.0
 
 
 def _trace_lines(image_bytes: bytes, description: str, *, model_id: str,
-                 seed: int = 0) -> dict:
+                 seed: int = 0,
+                 on_slow_start: Callable[[], None] | None = None) -> dict:
     """Generate an image that follows the drawing's edges; return it."""
     return _generate(model_id, {
         "prompt": description,
@@ -130,11 +158,12 @@ def _trace_lines(image_bytes: bytes, description: str, *, model_id: str,
         "control_lora_strength": _LINES_CONTROL_STRENGTH,
         # The sketchpad is square; matching it keeps the edges undistorted.
         "image_size": "square_hd",
-    }, seed=seed)
+    }, seed=seed, on_slow_start=on_slow_start)
 
 
 def _generate(model_id: str, model_arguments: dict[str, object], *,
-              seed: int = 0) -> dict:
+              seed: int = 0,
+              on_slow_start: Callable[[], None] | None = None) -> dict:
     """Run one fal image model; return the first image back."""
     arguments: dict[str, object] = {
         **model_arguments,
@@ -147,7 +176,7 @@ def _generate(model_id: str, model_arguments: dict[str, object], *,
     if seed:
         arguments["seed"] = int(seed)
 
-    result = _call(model_id, arguments)
+    result = _call(model_id, arguments, on_slow_start=on_slow_start)
 
     # fal blanks flagged outputs (a black image) rather than erroring.
     if any(result.get("has_nsfw_concepts") or []):
@@ -229,7 +258,8 @@ def render_sketch(image_bytes: bytes, prompt: str, *,
                   style: str = DEFAULT_RENDER_STYLE,
                   negative_prompt: str | None = None,
                   seed: int = 0,
-                  model_id: str | None = None) -> dict:
+                  model_id: str | None = None,
+                  on_slow_start: Callable[[], None] | None = None) -> dict:
     """Render a line drawing into a finished image.
 
     There is no caller-selectable ``model_id`` from the browser's point of
@@ -240,6 +270,9 @@ def render_sketch(image_bytes: bytes, prompt: str, *,
     ``style`` picks a prompt from ``RENDER_STYLES`` and, with it, the model:
     ``config.FAL_LINES_MODEL`` for "lines", ``config.FAL_RENDER_MODEL``
     otherwise.
+
+    ``on_slow_start`` is called once if fal is still starting the model up
+    after a few seconds, so the caller can tell the user why it's slow.
 
     Neither model has a negative-prompt field. Kontext gets
     ``negative_prompt`` folded into the instruction as an explicit list of
@@ -253,12 +286,12 @@ def render_sketch(image_bytes: bytes, prompt: str, *,
     if style == "lines":
         return _trace_lines(image_bytes, text,
                             model_id=model_id or config.FAL_LINES_MODEL,
-                            seed=seed)
+                            seed=seed, on_slow_start=on_slow_start)
     avoid = ", ".join(p for p in (negative_prompt, _RENDER_NEGATIVE_HINT) if p)
     text += f" Avoid: {avoid}."
     return _edit_image(image_bytes, text,
                        model_id=model_id or config.FAL_RENDER_MODEL,
-                       seed=seed)
+                       seed=seed, on_slow_start=on_slow_start)
 
 
 #: Fixed instruction for the T-pose transform — never caller-supplied, since

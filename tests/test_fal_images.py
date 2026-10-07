@@ -7,6 +7,7 @@ results.
 from __future__ import annotations
 
 import base64
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,12 +20,17 @@ def data_uri(data: bytes, mime: str = "image/png") -> str:
 
 
 class StubClient:
-    def __init__(self, *results):
+    def __init__(self, *results, queue_updates=()):
         self.results = list(results)
         self.calls = []
+        self.queue_updates = list(queue_updates)
 
     def subscribe(self, model_id, arguments, **kwargs):
         self.calls.append((model_id, arguments))
+        on_queue_update = kwargs.get("on_queue_update")
+        for status in self.queue_updates:
+            if on_queue_update:
+                on_queue_update(status)
         result = self.results.pop(0)
         if isinstance(result, Exception):
             raise result
@@ -94,6 +100,41 @@ def test_animated_style_edits_with_kontext_leading_with_the_subject(
     assert "Front view" in instruction
     assert fal_images.FULL_BODY_HINT in instruction
     assert "three-quarter view" in instruction.split("Avoid:")[1]
+
+
+def test_slow_start_is_reported_once_while_still_queued(monkeypatch):
+    import fal_client
+
+    clock = iter([0.0, 1.0, 6.0, 9.0])
+    monkeypatch.setattr(fal_images, "time",
+                        SimpleNamespace(monotonic=lambda: next(clock)))
+    queued = fal_client.Queued(position=0)
+    client = StubClient(edited(b"out"), queue_updates=[queued, queued, queued])
+    monkeypatch.setattr(fal_images, "_get_client", lambda: client)
+    calls = []
+
+    fal_images.render_sketch(b"x", "a dog",
+                             on_slow_start=lambda: calls.append(1))
+
+    assert calls == [1]
+
+
+def test_a_quick_start_is_not_reported(monkeypatch):
+    import fal_client
+
+    clock = iter([0.0, 1.0])
+    monkeypatch.setattr(fal_images, "time",
+                        SimpleNamespace(monotonic=lambda: next(clock)))
+    client = StubClient(edited(b"out"),
+                        queue_updates=[fal_client.Queued(position=0),
+                                       fal_client.InProgress(logs=None)])
+    monkeypatch.setattr(fal_images, "_get_client", lambda: client)
+    calls = []
+
+    fal_images.render_sketch(b"x", "a dog",
+                             on_slow_start=lambda: calls.append(1))
+
+    assert calls == []
 
 
 def test_unknown_style_is_refused(stub):

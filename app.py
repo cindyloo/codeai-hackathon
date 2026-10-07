@@ -247,7 +247,10 @@ def render_sketch():
             # so a close-up here cannot be recovered downstream.
             result = fal_images.render_sketch(
                 image_bytes, prompt, style=style,
-                negative_prompt=fal_images.FULL_BODY_NEGATIVE_HINT)
+                negative_prompt=fal_images.FULL_BODY_NEGATIVE_HINT,
+                on_slow_start=lambda: progress(
+                    0.1, "Starting the drawing model — this can take a "
+                         "minute the first time…"))
         except fal_images.FalError as exc:
             raise ProviderError(exc.message, detail=exc.detail) from exc
         return {
