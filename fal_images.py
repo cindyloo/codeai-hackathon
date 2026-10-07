@@ -157,9 +157,15 @@ def render_sketch(image_bytes: bytes, prompt: str, *,
     into the instruction as an explicit list of things to avoid.
     """
     instruction = (
-        "Turn this drawing into a finished, colored illustration. Keep the "
-        "drawing's character, shape, proportions and composition. "
-        f"Description: {prompt}."
+        "Turn this drawing into a finished, colored illustration of the same "
+        "subject. Keep exactly what was drawn, with only the features the "
+        "drawing already has. Keep the drawing's shape, proportions and "
+        "composition. "
+        f"Description: {prompt}. "
+        "Style: cartoon illustration, flat colors, bold clean black outlines, "
+        "children's drawing style. A single subject, centered in frame. "
+        "Background: plain, solid pure white, nothing else, no shadows, no "
+        "ground line."
     )
     if negative_prompt:
         instruction += f" Avoid: {negative_prompt}."
