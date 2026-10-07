@@ -32,7 +32,7 @@ _PENDING_STATUSES = {
 _SUCCESS_STATUSES = {"complete", "completed", "done", "ok", "success", "succeeded"}
 _FAILED_STATUSES = {"cancelled", "canceled", "error", "failed", "failure"}
 _HUMANOID_LABELS = {"biped", "human", "humanoid", "person"}
-_ANIMAL_LABELS = {"animal", "dog", "cat"}
+_ANIMAL_LABELS = {"animal", "dog", "cat", "quadruped"}
 _VEHICLE_LABELS = {"car", "truck", "bike","automobile", "van"}
 
 # The rigging service uses semantic joint names but the Teach contract has its
