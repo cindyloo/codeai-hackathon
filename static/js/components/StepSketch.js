@@ -333,7 +333,9 @@ export const StepSketch = {
           <p class="muted" v-if="!hasDrawing">Draw something
              on the left first.</p>
           <p class="muted" v-else>Sends your line drawing and this prompt to
-             a fal.ai image model. The result becomes your rigged avatar. This option takes a good four minutes on the first round.</p>
+             a fal.ai image model. The result becomes your rigged avatar.
+             <template v-if="renderStyle === 'lines'">This option takes a good
+             four minutes on the first round.</template></p>
 
           <div v-if="renderBusy" class="progress">
             <div class="progress-bar" :style="{ width: renderPercent + '%' }"></div>
