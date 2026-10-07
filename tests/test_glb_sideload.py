@@ -133,3 +133,25 @@ def test_sideload_names_the_missing_required_joint(client):
 
     assert response.status_code == 400
     assert "missing required joints: head" in response.get_json()["error"]
+
+
+def test_sideload_works_when_the_server_terminates_the_input_stream(client):
+    # gunicorn (production) sets wsgi.input_terminated, which makes Werkzeug
+    # treat max_content_length as a hard cap on the stream; a cap equal to the
+    # exact body size used to 413 every upload there, while the dev server and
+    # the plain test client never saw it.
+    response = client.post(
+        "/api/avatars/glb",
+        data={"glb": (io.BytesIO(FIXTURE.read_bytes()), "avatar.glb")},
+        environ_overrides={"wsgi.input_terminated": True},
+    )
+
+    assert response.status_code == 201, response.get_json()
+
+
+def test_an_oversized_glb_names_the_glb_limit(client, monkeypatch):
+    monkeypatch.setattr(app_module.config, "MAX_GLB_UPLOAD_BYTES", 1024 * 1024)
+    response = post_glb(client, b"x" * (2 * 1024 * 1024))
+
+    assert response.status_code == 413
+    assert "GLB is too big" in response.get_json()["error"]

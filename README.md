@@ -110,7 +110,7 @@ build steps.
 `RIGGING_SERVICE_TIMEOUT` is the overall remote deadline (default 300 seconds)
 including augmentation, and `RIGGING_POLL_INTERVAL` controls mesh/rig status
 polling (default 5 seconds). Other vars: `EPISODE_RATE` (episodes/sec at speed
-1, default 20), `DATA_DIR`, `MAX_UPLOAD_BYTES`.
+1, default 20), `DATA_DIR`, `MAX_UPLOAD_BYTES`, `MAX_GLB_UPLOAD_BYTES`.
 
 ## Claude prompt endpoint
 

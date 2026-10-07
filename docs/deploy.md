@@ -142,6 +142,7 @@ slug.
 | `EPISODE_RATE` | `20` | episodes/sec at speed 1; higher means more work per trainee |
 | `DATA_DIR` | `./data` | upload location |
 | `MAX_UPLOAD_BYTES` | `8388608` | 8MB |
+| `MAX_GLB_UPLOAD_BYTES` | `104857600` | 100MB, for the Load GLB button |
 | `ANTHROPIC_API_KEY` | — | Claude prompt endpoint; unset = it fails closed with a 503 |
 | `LLM_API_TOKEN` | — | **unset = the Claude endpoint returns 404.** Server-side only |
 | `CLAUDE_ALLOWED_MODELS` | — | comma-separated; **empty = every model refused** |

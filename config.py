@@ -52,6 +52,11 @@ EPISODE_RATE = float(os.environ.get("EPISODE_RATE", "20"))
 #: Max upload size for a sketch.
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 8 * 1024 * 1024))
 
+#: Max upload size for a sideloaded rigged GLB. Matches the largest GLB the
+#: real rigger will download.
+MAX_GLB_UPLOAD_BYTES = int(
+    os.environ.get("MAX_GLB_UPLOAD_BYTES", 100 * 1024 * 1024))
+
 #: Path to a rigged GLB the mock rigger should serve instead of the procedural
 #: figure. Lets the whole GLB path be exercised before a real rigger exists:
 #:   MOCK_RIG_GLB=tests/fixtures/mixamo-style.glb flask --app app run

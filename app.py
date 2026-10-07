@@ -90,6 +90,9 @@ def _not_found(_):
 
 @app.errorhandler(413)
 def _too_large(_):
+    if request.path == "/api/avatars/glb":
+        mb = config.MAX_GLB_UPLOAD_BYTES // (1024 * 1024)
+        return fail(f"That GLB is too big — keep it under {mb}MB.", 413)
     mb = config.MAX_UPLOAD_BYTES // (1024 * 1024)
     return fail(f"That image is too big — keep it under {mb}MB.", 413)
 
@@ -153,8 +156,11 @@ def create_avatar():
 def sideload_avatar():
     """Create an avatar directly from a compatible rigged GLB."""
     # Rigged models are routinely much larger than sketch images. Override the
-    # app-wide sketch limit before Werkzeug parses the multipart body.
-    request.max_content_length = request.content_length or (1 << 63) - 1
+    # app-wide sketch limit before Werkzeug parses the multipart body. This must
+    # be a ceiling above the body size, not the body size itself: under gunicorn
+    # (wsgi.input_terminated) Werkzeug enforces it as a hard stream cap, and
+    # the parser's final read at exactly the cap raises 413.
+    request.max_content_length = config.MAX_GLB_UPLOAD_BYTES
     upload = request.files.get("glb")
     if upload is None:
         return fail("No GLB was uploaded.")
