@@ -15,6 +15,7 @@ export const StepSketch = {
     const hasDrawing = ref(false);
     const uploadCleaned = ref(false);
     const renderPrompt = ref("");
+    const renderStyle = ref("lines"); // "lines" | "animated"
     const renderBusy = ref(false);
     const renderProgress = ref(0);
     const renderMessage = ref("");
@@ -236,6 +237,7 @@ export const StepSketch = {
         const imageBlob = await drawingBlob(
           (text) => { renderMessage.value = text; });
         const result = await api.renderSketch(imageBlob, renderPrompt.value,
+          renderStyle.value,
           (fraction, msg) => { renderProgress.value = fraction; renderMessage.value = msg; });
         renderedBlob = renderedResultBlob(result);
         renderedImage.value = `data:image/${result.output_format};base64,${result.image_base64}`;
@@ -249,7 +251,7 @@ export const StepSketch = {
     return {
       canvas, busy, progress, message, error, hasDrawing,
       glbBusy,
-      renderPrompt, renderBusy, renderError, renderedImage,
+      renderPrompt, renderStyle, renderBusy, renderError, renderedImage,
       tool, undoStack,
       start, move, end, clearCanvas, loadFile, loadGlb, bringToLife, renderImage, undo,
       percent: computed(() => Math.round(progress.value * 100)),
@@ -319,6 +321,14 @@ export const StepSketch = {
                     @click="renderImage">
               {{ renderBusy ? 'Rendering…' : 'Render' }}
             </button>
+          </div>
+          <div class="render-segmented two" role="group" aria-label="Render style">
+            <button :class="{ active: renderStyle === 'lines' }"
+                    :disabled="renderBusy || busy || glbBusy"
+                    @click="renderStyle = 'lines'">Keep my lines</button>
+            <button :class="{ active: renderStyle === 'animated' }"
+                    :disabled="renderBusy || busy || glbBusy"
+                    @click="renderStyle = 'animated'">Cartoon animation</button>
           </div>
           <p class="muted" v-if="!hasDrawing">Draw something
              on the left first.</p>

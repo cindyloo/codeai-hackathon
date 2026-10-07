@@ -68,10 +68,11 @@ export const api = {
 
   getAvatar: (id) => request(`/api/avatars/${id}`),
 
-  async renderSketch(imageBlob, prompt, onProgress) {
+  async renderSketch(imageBlob, prompt, style, onProgress) {
     const form = new FormData();
     form.append("image", imageBlob, "sketch.png");
     form.append("prompt", prompt);
+    form.append("style", style);
     const job = await request("/api/renders", { method: "POST", body: form });
     return waitForJob(job, onProgress);
   },

@@ -232,6 +232,11 @@ def render_sketch():
         return fail(f"Prompt is too long — the limit is "
                     f"{config.MAX_PROMPT_CHARS} characters.", 413)
 
+    style = request.form.get("style", fal_images.DEFAULT_RENDER_STYLE)
+    if style not in fal_images.RENDER_STYLES:
+        return fail("Pick a render style: "
+                    + ", ".join(fal_images.RENDER_STYLES) + ".")
+
     refusal = render_limiter.check(request.remote_addr or "unknown")
     if refusal:
         return fail(refusal, 429)
@@ -241,7 +246,7 @@ def render_sketch():
             # Rigging and the later T-pose transform both consume this render,
             # so a close-up here cannot be recovered downstream.
             result = fal_images.render_sketch(
-                image_bytes, f"{prompt}, {fal_images.FULL_BODY_HINT}",
+                image_bytes, prompt, style=style,
                 negative_prompt=fal_images.FULL_BODY_NEGATIVE_HINT)
         except fal_images.FalError as exc:
             raise ProviderError(exc.message, detail=exc.detail) from exc

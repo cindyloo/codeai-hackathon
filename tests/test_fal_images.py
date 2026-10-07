@@ -50,6 +50,7 @@ def test_render_sends_the_drawing_and_returns_the_image(stub, monkeypatch):
     client = stub(edited(b"out", "image/jpeg"))
 
     result = fal_images.render_sketch(b"\x89PNG drawing", "a robot",
+                                      style="animated",
                                       negative_prompt="blurry")
 
     assert result == {"image_bytes": b"out", "output_format": "jpeg",
@@ -59,6 +60,46 @@ def test_render_sends_the_drawing_and_returns_the_image(stub, monkeypatch):
     assert arguments["image_url"] == data_uri(b"\x89PNG drawing")
     assert "a robot" in arguments["prompt"]
     assert "Avoid: blurry" in arguments["prompt"]
+
+
+def test_lines_style_traces_the_drawing_with_the_controlnet_model(
+        stub, monkeypatch):
+    monkeypatch.setattr(config, "FAL_LINES_MODEL", "lines-model")
+    client = stub(edited(b"out"))
+
+    result = fal_images.render_sketch(b"\x89PNG drawing", "a dog",
+                                      style="lines", negative_prompt="blurry")
+
+    assert result["image_bytes"] == b"out"
+    model_id, arguments = client.calls[0]
+    assert model_id == "lines-model"
+    assert arguments["control_lora_image_url"] == data_uri(b"\x89PNG drawing")
+    assert "image_url" not in arguments
+    assert arguments["prompt"].startswith("a dog.")
+    assert "Avoid" not in arguments["prompt"]
+
+
+def test_animated_style_edits_with_kontext_leading_with_the_subject(
+        stub, monkeypatch):
+    monkeypatch.setattr(config, "FAL_RENDER_MODEL", "render-model")
+    client = stub(edited(b"out"))
+
+    fal_images.render_sketch(b"x", "a dog", style="animated")
+
+    model_id, arguments = client.calls[0]
+    instruction = arguments["prompt"]
+    assert model_id == "render-model"
+    assert arguments["image_url"] == data_uri(b"x")
+    assert instruction.index("a dog") < 40
+    assert "Front view" in instruction
+    assert fal_images.FULL_BODY_HINT in instruction
+    assert "three-quarter view" in instruction.split("Avoid:")[1]
+
+
+def test_unknown_style_is_refused(stub):
+    stub(edited(b"out"))
+    with pytest.raises(ValueError):
+        fal_images.render_sketch(b"x", "a dog", style="photoreal")
 
 
 def test_flagged_output_is_a_422(stub):

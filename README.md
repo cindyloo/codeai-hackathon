@@ -134,9 +134,11 @@ rate-limit usage.
 
 The sketch render (`POST /api/renders`) and T-pose (`POST
 /api/avatars/<id>/tpose`) features use fal.ai instead — set `FAL_KEY`. Models
-default to FLUX.1 Kontext (`fal-ai/flux-pro/kontext`) for rendering and posing
-and BiRefNet (`fal-ai/birefnet/v2`) for background removal; override with
-`FAL_RENDER_MODEL`, `FAL_TPOSE_MODEL` and `FAL_BG_REMOVAL_MODEL`.
+default to a canny ControlNet (`fal-ai/flux-control-lora-canny`) for the
+"Keep my lines" render, FLUX.1 Kontext (`fal-ai/flux-pro/kontext`) for the
+"Cartoon animation" render and posing, and BiRefNet (`fal-ai/birefnet/v2`) for
+background removal; override with `FAL_LINES_MODEL`, `FAL_RENDER_MODEL`,
+`FAL_TPOSE_MODEL` and `FAL_BG_REMOVAL_MODEL`.
 
 **The token is server-side only — never ship it to the browser.** The frontend
 does not call this endpoint. Details, including the threat model:

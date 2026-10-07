@@ -135,10 +135,16 @@ LLM_RATE_PER_DAY = int(os.environ.get("LLM_RATE_PER_DAY", "500"))
 #: fal.ai API key (https://fal.ai/dashboard/keys).
 FAL_KEY = os.environ.get("FAL_KEY", "").strip()
 
-#: Image editor for the free-text sketch render: takes the drawing as a
+#: Image editor for the "animated" sketch render: takes the drawing as a
 #: reference image plus an instruction.
 FAL_RENDER_MODEL = os.environ.get(
     "FAL_RENDER_MODEL", "fal-ai/flux-pro/kontext").strip()
+
+#: Edge-conditioned (canny ControlNet) generator for the "lines" sketch
+#: render: traces the drawing's strokes and colors them in. Must accept
+#: fal's control_lora_image_url input.
+FAL_LINES_MODEL = os.environ.get(
+    "FAL_LINES_MODEL", "fal-ai/flux-control-lora-canny").strip()
 
 #: Image editor for the T-pose redraw (stage 1). A separate setting so the
 #: two features can diverge later.

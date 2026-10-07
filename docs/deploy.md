@@ -149,7 +149,8 @@ slug.
 | `CLAUDE_TIMEOUT` | `60` | seconds |
 | `MAX_PROMPT_CHARS` | `20000` | prompt size limit (prompt endpoint and sketch render) |
 | `FAL_KEY` | — | sketch render + T-pose; unset = both return 503 |
-| `FAL_RENDER_MODEL` | `fal-ai/flux-pro/kontext` | sketch render |
+| `FAL_LINES_MODEL` | `fal-ai/flux-control-lora-canny` | sketch render, "Keep my lines" (canny ControlNet) |
+| `FAL_RENDER_MODEL` | `fal-ai/flux-pro/kontext` | sketch render, "Cartoon animation" |
 | `FAL_TPOSE_MODEL` | `fal-ai/flux-pro/kontext` | T-pose redraw |
 | `FAL_BG_REMOVAL_MODEL` | `fal-ai/birefnet/v2` | T-pose background removal |
 | `FAL_TIMEOUT` | `120` | seconds per fal call, queue time included |

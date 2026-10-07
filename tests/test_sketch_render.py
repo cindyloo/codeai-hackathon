@@ -56,6 +56,7 @@ def test_render_accepts_a_drawing_without_creating_or_rigging_an_avatar(
         captured.update(
             image_bytes=image_bytes,
             prompt=prompt,
+            style=kwargs.get("style"),
             negative_prompt=kwargs.get("negative_prompt"),
         )
         return {"image_bytes": RENDERED, "output_format": "png", "seed": 7}
@@ -77,11 +78,45 @@ def test_render_accepts_a_drawing_without_creating_or_rigging_an_avatar(
     assert job.status == "done"
     assert captured == {
         "image_bytes": DRAWING,
-        "prompt": f"a colorful robot, {fal_images.FULL_BODY_HINT}",
+        "prompt": "a colorful robot",
+        "style": "lines",
         "negative_prompt": fal_images.FULL_BODY_NEGATIVE_HINT,
     }
     assert base64.b64decode(job.result["image_base64"]) == RENDERED
     assert set(store.avatars) == avatar_ids
+
+
+def test_render_passes_the_chosen_style(client, monkeypatch):
+    captured = {}
+
+    def fake_render(image_bytes, prompt, **kwargs):
+        captured["style"] = kwargs.get("style")
+        return {"image_bytes": RENDERED, "output_format": "png", "seed": 7}
+
+    monkeypatch.setattr(fal_images, "render_sketch", fake_render)
+
+    response = client.post(
+        "/api/renders",
+        data={"image": (io.BytesIO(DRAWING), "drawing.png"),
+              "prompt": "a dog", "style": "animated"},
+    )
+
+    assert response.status_code == 202
+    assert wait_for_job(response.get_json()["id"]).status == "done"
+    assert captured == {"style": "animated"}
+
+
+def test_render_refuses_an_unknown_style(client, monkeypatch):
+    monkeypatch.setattr(fal_images, "render_sketch",
+                        lambda *a, **k: pytest.fail("must not render"))
+
+    response = client.post(
+        "/api/renders",
+        data={"image": (io.BytesIO(DRAWING), "drawing.png"),
+              "prompt": "a dog", "style": "photoreal"},
+    )
+
+    assert response.status_code == 400
 
 
 def test_avatar_creation_passes_rendered_bytes_to_rigging_unchanged(

@@ -1,8 +1,10 @@
 """fal.ai image client: sketch rendering and the T-pose transform.
 
-Rendering and the T-pose redraw both go to an instruction-driven image editor
-(FLUX.1 Kontext by default): the drawing goes in as the reference image and
-the prompt says what to do with it. Background removal is a separate
+The "animated" render and the T-pose redraw go to an instruction-driven image
+editor (FLUX.1 Kontext by default): the drawing goes in as the reference image
+and the prompt says what to do with it. The "lines" render instead goes to an
+edge-conditioned (canny ControlNet) generator, which traces the drawing's own
+strokes, so pose, view and face come from the drawing rather than the model. Background removal is a separate
 segmentation model (BiRefNet), since the editor can't output an alpha channel.
 
 The API key comes from the environment (`FAL_KEY`) and is only ever handed to
@@ -108,9 +110,34 @@ def _fetch(image: dict | None) -> bytes:
 def _edit_image(image_bytes: bytes, instruction: str, *, model_id: str,
                 seed: int = 0) -> dict:
     """Send one image plus an instruction; return the first image back."""
-    arguments: dict[str, object] = {
+    return _generate(model_id, {
         "prompt": instruction,
         "image_url": _data_uri(image_bytes),
+    }, seed=seed)
+
+
+#: How strictly the "lines" render follows the drawing's edges (fal's default
+#: is 1.0). Lower lets the model tidy wobbly strokes at the cost of fidelity.
+_LINES_CONTROL_STRENGTH = 1.0
+
+
+def _trace_lines(image_bytes: bytes, description: str, *, model_id: str,
+                 seed: int = 0) -> dict:
+    """Generate an image that follows the drawing's edges; return it."""
+    return _generate(model_id, {
+        "prompt": description,
+        "control_lora_image_url": _data_uri(image_bytes),
+        "control_lora_strength": _LINES_CONTROL_STRENGTH,
+        # The sketchpad is square; matching it keeps the edges undistorted.
+        "image_size": "square_hd",
+    }, seed=seed)
+
+
+def _generate(model_id: str, model_arguments: dict[str, object], *,
+              seed: int = 0) -> dict:
+    """Run one fal image model; return the first image back."""
+    arguments: dict[str, object] = {
+        **model_arguments,
         "output_format": "png",
         "num_images": 1,
         # Return the image inline rather than as a CDN URL: one less request,
@@ -142,41 +169,6 @@ def _edit_image(image_bytes: bytes, instruction: str, *, model_id: str,
     }
 
 
-def render_sketch(image_bytes: bytes, prompt: str, *,
-                  negative_prompt: str | None = None,
-                  seed: int = 0,
-                  model_id: str | None = None) -> dict:
-    """Render a line drawing into a finished image.
-
-    There is no caller-selectable ``model_id`` from the browser's point of
-    view: it defaults to ``config.FAL_RENDER_MODEL``, and the only other
-    caller (``pose_to_tshape``) passes a different fixed model of its own
-    rather than letting one bubble up from a request.
-
-    The editor has no negative-prompt field, so ``negative_prompt`` is folded
-    into the instruction as an explicit list of things to avoid.
-    """
-    instruction = (
-        "Turn this drawing into a finished, colored illustration of the same "
-        "subject. Keep exactly what was drawn, with only the features the "
-        "drawing already has. Keep the drawing's shape, proportions and "
-        "composition. Keep the exact pose and viewing angle from the drawing: "
-        "same facing direction, same position of every limb. Keep the head "
-        "and face exactly as drawn: same head shape, ears, eyes, nose, mouth, "
-        "expression and markings. Only add color and clean up the lines. "
-        f"Description: {prompt}. "
-        "Style: cartoon illustration, flat colors, bold clean black outlines, "
-        "children's drawing style. A single subject, centered in frame. "
-        "Background: plain, solid pure white, nothing else, no shadows, no "
-        "ground line."
-    )
-    if negative_prompt:
-        instruction += f" Avoid: {negative_prompt}."
-    return _edit_image(image_bytes, instruction,
-                       model_id=model_id or config.FAL_RENDER_MODEL,
-                       seed=seed)
-
-
 #: Without explicit whole-subject framing, image models regularly crop in to a
 #: head-and-shoulders portrait — which then has no arms or legs left to put
 #: into a T-pose at all. Once that's happened there is no recovering it: a
@@ -192,6 +184,82 @@ FULL_BODY_HINT = (
     "wide shot with some margin around it, not a close-up, not cropped"
 )
 FULL_BODY_NEGATIVE_HINT = "close-up, cropped, zoomed in, cut off at the edges"
+
+#: Used by the "animated" style. Kontext only holds on to what an instruction
+#: names explicitly, so the subject leads (a front-on animal drawing otherwise
+#: reads as a cat whatever the description says) and the view is spelled out
+#: (otherwise it drifts to the three-quarter view character art defaults to).
+_RENDER_FRAMING = (
+    "Keep the exact pose from the drawing, with the same position of every "
+    "limb. Front view: the subject faces the viewer straight on, head and "
+    f"body not turned. Framing: {FULL_BODY_HINT}. A single subject, "
+    "centered in frame. Background: "
+    "plain, solid pure white, nothing else, no shadows, no ground line."
+)
+_RENDER_NEGATIVE_HINT = (
+    "three-quarter view, side view, profile, turned head, turned body"
+)
+
+#: Render styles the browser may pick between. "lines" keeps the child's own
+#: strokes and only colors them in, via the edge-conditioned model — its
+#: prompt is a plain description of the picture, since that model generates
+#: rather than edits and the edges already fix pose, view and framing.
+#: "animated" lets Kontext redraw the drawing as a cartoon character, which
+#: looks more polished but strays further from what was drawn.
+RENDER_STYLES = {
+    "lines": (
+        "{prompt}. A children's line drawing colored in with flat colors: "
+        "bold black outlines, every shape filled with solid color, front "
+        "view, the whole subject fully visible and centered, on a plain "
+        "solid pure white background."
+    ),
+    "animated": (
+        "Turn this drawing of {prompt} into a colored 2D cartoon animation "
+        "character. Keep the drawing's shape and proportions, and keep the "
+        "head and face as drawn — same head shape, ears, eye placement, "
+        "expression and markings — drawn clearly as {prompt}. "
+        f"{_RENDER_FRAMING} Style: 2D cartoon animation, flat colors, bold "
+        "clean black outlines, children's drawing style."
+    ),
+}
+DEFAULT_RENDER_STYLE = "lines"
+
+
+def render_sketch(image_bytes: bytes, prompt: str, *,
+                  style: str = DEFAULT_RENDER_STYLE,
+                  negative_prompt: str | None = None,
+                  seed: int = 0,
+                  model_id: str | None = None) -> dict:
+    """Render a line drawing into a finished image.
+
+    There is no caller-selectable ``model_id`` from the browser's point of
+    view: it defaults to ``config.FAL_RENDER_MODEL``, and the only other
+    caller (``pose_to_tshape``) passes a different fixed model of its own
+    rather than letting one bubble up from a request.
+
+    ``style`` picks a prompt from ``RENDER_STYLES`` and, with it, the model:
+    ``config.FAL_LINES_MODEL`` for "lines", ``config.FAL_RENDER_MODEL``
+    otherwise.
+
+    Neither model has a negative-prompt field. Kontext gets
+    ``negative_prompt`` folded into the instruction as an explicit list of
+    things to avoid; the "lines" model drops it, since FLUX [dev] tends to
+    draw what a prompt names rather than avoid it, and the drawing's edges
+    already pin down the framing it guards against.
+    """
+    if style not in RENDER_STYLES:
+        raise ValueError(f"unknown render style {style!r}")
+    text = RENDER_STYLES[style].format(prompt=prompt)
+    if style == "lines":
+        return _trace_lines(image_bytes, text,
+                            model_id=model_id or config.FAL_LINES_MODEL,
+                            seed=seed)
+    avoid = ", ".join(p for p in (negative_prompt, _RENDER_NEGATIVE_HINT) if p)
+    text += f" Avoid: {avoid}."
+    return _edit_image(image_bytes, text,
+                       model_id=model_id or config.FAL_RENDER_MODEL,
+                       seed=seed)
+
 
 #: Fixed instruction for the T-pose transform — never caller-supplied, since
 #: this endpoint always wants the same thing: a clean, riggable reference pose.
