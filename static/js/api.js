@@ -60,10 +60,13 @@ export const api = {
     return waitForJob(job, onProgress);
   },
 
-  async sideloadAvatar(glbFile) {
+  // A rigged GLB comes straight back as an avatar; one without a skeleton
+  // comes back as a rigging job, which takes minutes.
+  async sideloadAvatar(glbFile, onProgress) {
     const form = new FormData();
     form.append("glb", glbFile, glbFile.name || "avatar.glb");
-    return request("/api/avatars/glb", { method: "POST", body: form });
+    const body = await request("/api/avatars/glb", { method: "POST", body: form });
+    return body.rig ? body : waitForJob(body, onProgress);
   },
 
   getAvatar: (id) => request(`/api/avatars/${id}`),

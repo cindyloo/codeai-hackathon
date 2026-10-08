@@ -168,8 +168,13 @@ export const StepSketch = {
       if (!file || busy.value || renderBusy.value || glbBusy.value) return;
       glbBusy.value = true;
       error.value = null;
+      progress.value = 0;
+      message.value = "Uploading your model...";
       try {
-        const avatar = await api.sideloadAvatar(file);
+        const avatar = await api.sideloadAvatar(file, (fraction, msg) => {
+          progress.value = fraction;
+          message.value = msg;
+        });
         setAvatar(avatar);
         goTo("pose");
       } catch (err) {
@@ -354,7 +359,7 @@ export const StepSketch = {
           <p class="muted">Render your character, then build its skeleton and
              open Teach.</p>
 
-          <div v-if="busy" class="progress">
+          <div v-if="busy || glbBusy" class="progress">
             <div class="progress-bar" :style="{ width: percent + '%' }"></div>
             <span>{{ message }}</span>
           </div>

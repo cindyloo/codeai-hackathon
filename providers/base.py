@@ -20,7 +20,7 @@ import threading
 from abc import ABC, abstractmethod
 from typing import Callable, Iterator
 
-from schemas import Clip, Episode, Rig, TrainConfig
+from schemas import Clip, Episode, ProviderError, Rig, TrainConfig
 
 #: progress(fraction 0..1, message shown to the user)
 Progress = Callable[[float, str], None]
@@ -40,6 +40,16 @@ class Rigger(ABC):
         The frontend renders both identically, so you can start procedural and
         switch to GLB later while the UI stays as it is.
         """
+
+    def rig_glb(self, glb_bytes: bytes, progress: Progress) -> Rig:
+        """Rig an uploaded GLB that has a mesh but no skeleton.
+
+        Optional: a rigger that can't auto-rig meshes keeps this default.
+        """
+        raise ProviderError(
+            "That model has no skeleton, and I can't add one right now. Try "
+            "a rigged GLB, or draw your character instead!",
+            detail=f"{type(self).__name__} cannot rig an uploaded GLB")
 
 
 class Poser(ABC):

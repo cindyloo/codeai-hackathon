@@ -154,7 +154,11 @@ def create_avatar():
 
 @app.post("/api/avatars/glb")
 def sideload_avatar():
-    """Create an avatar directly from a compatible rigged GLB."""
+    """Create an avatar from a GLB.
+
+    A compatible rigged GLB becomes an avatar immediately (201). A GLB with a
+    mesh but no skeleton is sent to the rigger instead, as a job (202).
+    """
     # Rigged models are routinely much larger than sketch images. Override the
     # app-wide sketch limit before Werkzeug parses the multipart body. This must
     # be a ceiling above the body size, not the body size itself: under gunicorn
@@ -171,6 +175,9 @@ def sideload_avatar():
 
     try:
         gltf.validate_avatar_glb(glb_bytes)
+    except gltf.GlbNotRiggedError:
+        log(f"[GLB sideload] {upload.filename!r} has no skeleton; auto-rigging")
+        return _auto_rig_glb(glb_bytes)
     except gltf.GlbError as exc:
         log(f"[GLB sideload] rejected {upload.filename!r}: {exc}")
         return fail(f"That GLB can't be used: {exc}.")
@@ -183,6 +190,18 @@ def sideload_avatar():
     ))
     avatar = store.add_avatar(rig)
     return jsonify(avatar.to_json()), 201
+
+
+def _auto_rig_glb(glb_bytes: bytes):
+    rigger = providers.get_rigger()
+
+    def work(progress):
+        rig = validate_rig(rigger.rig_glb(glb_bytes, progress))
+        avatar = store.add_avatar(rig)
+        return avatar.to_json()
+
+    job = runner.submit(work, message="Adding a skeleton to your model...")
+    return jsonify(job.to_json()), 202
 
 
 @app.get("/api/avatars/<avatar_id>")

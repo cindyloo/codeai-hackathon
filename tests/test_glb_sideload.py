@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import time
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,8 @@ import pytest
 import app as app_module
 import gltf
 import providers
-from schemas import BONES
+from jobs import runner
+from schemas import BONES, Rig
 from store import store
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mixamo-style.glb"
@@ -100,18 +102,60 @@ def test_sideload_rejects_missing_empty_and_malformed_files(
     assert message in response.get_json()["error"]
 
 
-def test_sideload_rejects_an_unskinned_model(client):
-    document = {
+def unskinned_glb() -> bytes:
+    return gltf.write_glb({
         "asset": {"version": "2.0"},
         "nodes": [{"name": bone} for bone in BONES],
         "scenes": [{"nodes": list(range(len(BONES)))}],
         "scene": 0,
-    }
+    }, b"")
 
-    response = post_glb(client, gltf.write_glb(document, b""))
 
-    assert response.status_code == 400
-    assert "does not contain a skinned skeleton" in response.get_json()["error"]
+def wait_for_job(job_id: str):
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        job = runner.get(job_id)
+        if job and job.status not in ("queued", "running"):
+            return job
+        time.sleep(0.01)
+    pytest.fail(f"job {job_id} did not finish")
+
+
+def test_an_unskinned_model_is_sent_to_the_rigger(client, monkeypatch):
+    received = {}
+
+    class AutoRigger:
+        def rig_glb(self, glb_bytes, progress):
+            received["glb"] = glb_bytes
+            progress(0.5, "Rigging...")
+            return Rig(format="glb", skeleton=list(BONES),
+                       glb_bytes=FIXTURE.read_bytes())
+
+    monkeypatch.setattr(providers, "get_rigger", lambda: AutoRigger())
+    upload = unskinned_glb()
+
+    response = post_glb(client, upload)
+
+    assert response.status_code == 202
+    job = wait_for_job(response.get_json()["id"])
+    assert job.status == "done", job.error
+    assert received["glb"] == upload
+    assert job.result["id"] in store.avatars
+    assert job.result["rig"]["format"] == "glb"
+
+
+def test_an_unskinned_model_fails_kindly_without_an_auto_rigger(
+        client, monkeypatch):
+    from providers.mock.rigging import MockRigger
+
+    monkeypatch.setattr(providers, "get_rigger", lambda: MockRigger())
+
+    response = post_glb(client, unskinned_glb())
+
+    assert response.status_code == 202
+    job = wait_for_job(response.get_json()["id"])
+    assert job.status == "error"
+    assert "no skeleton" in job.error
 
 
 def test_sideload_rejects_invalid_node_names_cleanly(client):

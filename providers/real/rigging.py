@@ -239,47 +239,18 @@ class RealRigger(Rigger):
             raise ProviderError(
                 "I didn't get a drawing. Try sketching something first!",
                 detail="empty image payload")
-        if not self.service_url:
-            raise ProviderError(
-                "The avatar builder isn't ready right now. Ask a grown-up to check it.",
-                detail="RIGGING_SERVICE_URL is not configured")
-        if self.timeout <= 0:
-            raise ProviderError(
-                "Your avatar took too long to build. Try again?",
-                detail=f"invalid rigging timeout: {self.timeout}")
-
-        deadline = self._clock() + self.timeout
+        deadline = self._start()
 
         progress(0.03, "Looking at your drawing...")
         classification = self._request_json(
             "POST", "/classify", deadline,
             raw_body=image_bytes, content_type=mime)
-        label = self._classification_label(classification)
-        if label not in _HUMANOID_LABELS and label not in _ANIMAL_LABELS and label not in _VEHICLE_LABELS:
-            raise ProviderError(
-                "I can only wake up drawings of people, animals, and vehicles right now. Try drawing "
-                "a person, animal with a head, two arms, and two legs. Or, draw a car from the side",
-                detail=f"unrecognized classification: {label!r}")
-
-        classify_id = self._find_value(classification, "classify_id")
-        if not isinstance(classify_id, (str, int)) or isinstance(classify_id, bool):
-            raise ProviderError(
-                "I couldn't understand the avatar builder. Try again?",
-                detail=f"classify response had no classify_id: {classification!r}")
-        encoded_id = quote(str(classify_id), safe="")
+        encoded_id = self._accepted_classify_id(classification)
         classify_query = f"classify_id={encoded_id}"
 
-        progress(0.10, "Checking for an avatar we already built...")
-        # This service currently raises 500 when the optional cached file does
-        # not exist. Continue through the normal build path for either response.
-        cached = self._request_bytes(
-            "GET", f"/results/{encoded_id}/{encoded_id}_rigged.glb",
-            deadline, _MAX_GLB_BYTES, missing_statuses=(404, 500))
+        cached = self._cached_rig(encoded_id, deadline, progress)
         if cached is not None:
-            progress(0.94, "Bringing your avatar home...")
-            rig = self._make_rig(cached)
-            progress(0.99, "Your avatar is ready!")
-            return rig
+            return cached
 
         progress(0.14, "Posing your character for its new skeleton...")
         augmentation = self._request_json(
@@ -323,6 +294,76 @@ class RealRigger(Rigger):
             ),
             message="Building the 3D shape...")
 
+        return self._joints_and_rig(classify_query, deadline, progress)
+
+    def rig_glb(self, glb_bytes: bytes, progress: Progress) -> Rig:
+        """Rig an uploaded GLB that has a mesh but no skeleton.
+
+        seg_server's /mesh/upload stores the GLB as the record's mesh and
+        renders a front view of it as the image /classify would have stored,
+        so from there joints and rigging run exactly as for a drawing.
+        """
+        if not glb_bytes:
+            raise ProviderError("That GLB was empty.", detail="empty GLB payload")
+        deadline = self._start()
+
+        progress(0.05, "Looking at your model...")
+        classification = self._request_json(
+            "POST", "/mesh/upload", deadline,
+            raw_body=glb_bytes, content_type="model/gltf-binary")
+        encoded_id = self._accepted_classify_id(classification)
+
+        cached = self._cached_rig(encoded_id, deadline, progress)
+        if cached is not None:
+            return cached
+        return self._joints_and_rig(f"classify_id={encoded_id}", deadline, progress)
+
+    def _start(self) -> float:
+        """Check the service is configured; return the overall deadline."""
+        if not self.service_url:
+            raise ProviderError(
+                "The avatar builder isn't ready right now. Ask a grown-up to check it.",
+                detail="RIGGING_SERVICE_URL is not configured")
+        if self.timeout <= 0:
+            raise ProviderError(
+                "Your avatar took too long to build. Try again?",
+                detail=f"invalid rigging timeout: {self.timeout}")
+        return self._clock() + self.timeout
+
+    def _accepted_classify_id(self, classification: dict[str, Any]) -> str:
+        """Refuse unsupported subjects; return the URL-encoded classify_id."""
+        label = self._classification_label(classification)
+        if label not in _HUMANOID_LABELS and label not in _ANIMAL_LABELS and label not in _VEHICLE_LABELS:
+            raise ProviderError(
+                "I can only wake up drawings of people, animals, and vehicles right now. Try drawing "
+                "a person, animal with a head, two arms, and two legs. Or, draw a car from the side",
+                detail=f"unrecognized classification: {label!r}")
+
+        classify_id = self._find_value(classification, "classify_id")
+        if not isinstance(classify_id, (str, int)) or isinstance(classify_id, bool):
+            raise ProviderError(
+                "I couldn't understand the avatar builder. Try again?",
+                detail=f"classify response had no classify_id: {classification!r}")
+        return quote(str(classify_id), safe="")
+
+    def _cached_rig(self, encoded_id: str, deadline: float,
+                    progress: Progress) -> Rig | None:
+        progress(0.10, "Checking for an avatar we already built...")
+        # This service currently raises 500 when the optional cached file does
+        # not exist. Continue through the normal build path for either response.
+        cached = self._request_bytes(
+            "GET", f"/results/{encoded_id}/{encoded_id}_rigged.glb",
+            deadline, _MAX_GLB_BYTES, missing_statuses=(404, 500))
+        if cached is not None:
+            progress(0.94, "Bringing your avatar home...")
+            rig = self._make_rig(cached)
+            progress(0.99, "Your avatar is ready!")
+            return rig
+
+        return None
+
+    def _joints_and_rig(self, classify_query: str, deadline: float,
+                        progress: Progress) -> Rig:
         progress(0.57, "Finding the head, arms and legs...")
         joint_response = self._request_json(
             "POST", f"/infer_joints?{classify_query}", deadline)

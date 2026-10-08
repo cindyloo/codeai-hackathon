@@ -59,10 +59,13 @@ Real GLB rigs must expose the 16 contract bone names from `schemas.py`. The same
 viewport path applies the JSON clip to procedural and GLB rigs, which keeps the
 mock and real provider workflows aligned.
 
-To skip drawing and auto-rigging, use **Load GLB** on the Draw step. The upload
-must be a skinned binary glTF with all 16 contract bones, either under their
-contract names or the supported Mixamo aliases. GLB sideloads are not subject
-to the sketch upload limit.
+To skip drawing, use **Load GLB** on the Draw step. A skinned binary glTF with
+all 16 contract bones, under their contract names or the supported Mixamo
+aliases, is used as-is. A GLB with a mesh but no skeleton is auto-rigged
+instead: with `PROVIDER_RIGGING=real` it goes to the rigging service's
+`/mesh/upload`, which renders a front view to classify and place joints on,
+then through `/infer_joints` and `/rig` as a drawing would. GLB sideloads are
+not subject to the sketch upload limit.
 
 ## Deploy
 

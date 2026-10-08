@@ -37,6 +37,10 @@ class GlbError(ValueError):
     """The bytes we were handed are not a GLB we can work with."""
 
 
+class GlbNotRiggedError(GlbError):
+    """A readable GLB with no skin: a mesh that could still be auto-rigged."""
+
+
 # --------------------------------------------------------------------------
 # Container
 # --------------------------------------------------------------------------
@@ -169,7 +173,7 @@ def validate_avatar_glb(data: bytes) -> dict[str, int]:
     if any("name" in node and not isinstance(node["name"], str) for node in nodes):
         raise GlbError("GLB contains a node with an invalid name")
     if not isinstance(skins, list) or not skins:
-        raise GlbError("GLB does not contain a skinned skeleton")
+        raise GlbNotRiggedError("GLB does not contain a skinned skeleton")
 
     joint_indices: set[int] = set()
     for skin_number, skin in enumerate(skins):

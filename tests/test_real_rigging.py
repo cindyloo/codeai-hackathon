@@ -291,6 +291,36 @@ def test_animals_and_vehicles_get_past_classification(label):
     assert "unrecognized classification" not in caught.value.detail
 
 
+def test_uploaded_glb_skips_augment_and_mesh_and_goes_to_joints():
+    rigged = make_glb()
+    rigger, opener = rigger_with([
+        ("/mesh/upload", {"category": "humanoid", "classify_id": "upload-1"}),
+        ("/results/upload-1/upload-1_rigged.glb", not_found()),
+        ("/infer_joints?classify_id=upload-1",
+         {"joint_hints": [{"name": "joint_pelvis"}]}),
+        ("/rig?classify_id=upload-1", {
+            "status": "completed",
+            "rigged_url": "http://worker.internal/files/rigged.glb",
+        }),
+        ("/files/rigged.glb", rigged),
+    ])
+
+    rig = rigger.rig_glb(b"glTF mesh", lambda *_: None)
+
+    assert rig.format == "glb"
+    assert opener.responses == []
+    assert opener.requests[0].data == b"glTF mesh"
+    assert opener.requests[0].get_header("Content-type") == "model/gltf-binary"
+
+
+def test_uploaded_glb_of_an_unsupported_subject_is_refused():
+    rigger, _ = rigger_with([
+        ("/mesh/upload", {"category": "building", "classify_id": "upload-2"}),
+    ])
+    with pytest.raises(ProviderError, match="unrecognized classification"):
+        rigger.rig_glb(b"glTF mesh", lambda *_: None)
+
+
 def test_malformed_json_is_reported_as_provider_error():
     rigger, _ = rigger_with([("/classify", b"<html>not json</html>")])
     with pytest.raises(ProviderError, match="malformed JSON"):
