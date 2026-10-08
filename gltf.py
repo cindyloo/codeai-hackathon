@@ -4,8 +4,8 @@ Two jobs:
 
   1. GLB container surgery — parse the header/chunks, edit the JSON, repack.
      Deliberately hand-rolled rather than pulling in pygltflib or trimesh: we
-     touch node rotations and `extras` only, never geometry, so the whole thing
-     is a few dozen lines and adds nothing to the slug.
+     touch node rotations, `extras` and appended animation data, never
+     geometry, so the whole thing is small and adds nothing to the slug.
 
   2. The same world-space retarget the browser does, in Python. A contract pose
      is a local rotation per bone in OUR frame, where every bone binds at
@@ -315,28 +315,26 @@ def contract_world_deltas(pose: dict[str, list[float]]) -> dict[str, tuple]:
     return world
 
 
-def pose_glb(document: dict[str, Any], pose: dict[str, list[float]],
-             bones: dict[str, int] | None = None) -> dict[str, int]:
-    """Write a contract pose into a glTF document's node rotations.
-
-    Returns the bone -> node-index map that was used, so a caller can record
-    which joints actually moved.
+def _solve_locals(document: dict[str, Any], pose: dict[str, list[float]],
+                  bones: dict[str, int]) -> dict[int, tuple]:
+    """The local rotation each mapped node needs to show `pose`.
 
     Walks the node tree top-down carrying each node's POSED world rotation:
     a mapped bone gets `delta * bind_world` and its local is solved against its
     parent's posed world; an unmapped bone (fingers, Spine1/2) keeps its local
     rotation and simply inherits the movement of its parents.
+
+    Reads the document's current node rotations as bind, so call it before
+    anything writes a pose into them.
     """
     nodes = document.get("nodes", [])
-    if bones is None:
-        bones = resolve_bones(document)
-
     bind_world = _bind_world_rotations(document)
     deltas = contract_world_deltas(pose)
     node_to_bone = {index: bone for bone, index in bones.items()}
     parents = _parents(document)
     roots = [i for i in range(len(nodes)) if i not in parents]
 
+    locals_: dict[int, tuple] = {}
     stack = [(r, IDENTITY_QUAT) for r in roots]
     while stack:
         index, parent_world = stack.pop()
@@ -345,8 +343,7 @@ def pose_glb(document: dict[str, Any], pose: dict[str, list[float]],
         if bone is not None:
             # World-space rotations pre-multiply: delta THEN bind orientation.
             desired = quat_mul(deltas[bone], bind_world[index])
-            local = quat_mul(_conjugate(parent_world), desired)
-            _set_node_rotation(nodes[index], local)
+            locals_[index] = quat_mul(_conjugate(parent_world), desired)
             here = desired
         else:
             here = quat_mul(parent_world, _node_rotation(nodes[index]))
@@ -354,7 +351,91 @@ def pose_glb(document: dict[str, Any], pose: dict[str, list[float]],
         for child in nodes[index].get("children", []) or []:
             stack.append((child, here))
 
+    return locals_
+
+
+def pose_glb(document: dict[str, Any], pose: dict[str, list[float]],
+             bones: dict[str, int] | None = None) -> dict[str, int]:
+    """Write a contract pose into a glTF document's node rotations.
+
+    Returns the bone -> node-index map that was used, so a caller can record
+    which joints actually moved.
+    """
+    if bones is None:
+        bones = resolve_bones(document)
+    nodes = document.get("nodes", [])
+    for index, q in _solve_locals(document, pose, bones).items():
+        _set_node_rotation(nodes[index], q)
     return bones
+
+
+# --------------------------------------------------------------------------
+# Animation
+# --------------------------------------------------------------------------
+
+_FLOAT = 5126   # componentType FLOAT
+
+
+def add_pose_animation(document: dict[str, Any], binary: bytes,
+                       keyframes: list[tuple[float, dict[str, list[float]]]],
+                       bones: dict[str, int], name: str) -> bytes:
+    """Bake contract-pose keyframes into a glTF animation. Returns the new BIN.
+
+    One LINEAR rotation channel per mapped bone, all sharing one time accessor.
+    Must run while the node rotations are still at bind — every keyframe is
+    retargeted against them — so call it BEFORE `pose_glb`.
+    """
+    nodes = document.get("nodes", [])
+    frames = [_solve_locals(document, pose, bones) for _t, pose in keyframes]
+    times = [float(t) for t, _pose in keyframes]
+
+    # Channels cannot target `matrix`; convert to TRS, keeping the bind value.
+    for index in bones.values():
+        if "matrix" in nodes[index]:
+            _set_node_rotation(nodes[index], _node_rotation(nodes[index]))
+
+    buffers = document.setdefault("buffers", [])
+    if not buffers:
+        buffers.append({"byteLength": 0})
+    views = document.setdefault("bufferViews", [])
+    accessors = document.setdefault("accessors", [])
+    out = bytearray(binary)
+
+    def push(values: list[float], kind: str, count: int, **extra) -> int:
+        out.extend(b"\x00" * (-len(out) % 4))
+        views.append({"buffer": 0, "byteOffset": len(out),
+                      "byteLength": 4 * len(values)})
+        out.extend(struct.pack(f"<{len(values)}f", *values))
+        accessors.append({"bufferView": len(views) - 1, "componentType": _FLOAT,
+                          "count": count, "type": kind, **extra})
+        return len(accessors) - 1
+
+    time_accessor = push(times, "SCALAR", len(times),
+                         min=[min(times)], max=[max(times)])
+
+    samplers, channels = [], []
+    for index in sorted(bones.values()):
+        values: list[float] = []
+        previous = None
+        for frame in frames:
+            q = frame[index]
+            # Keep neighbours in the same hemisphere so the slerp takes the
+            # short way round; not every viewer corrects for it.
+            if previous and sum(a * b for a, b in zip(q, previous)) < 0:
+                q = tuple(-c for c in q)
+            values.extend(q)
+            previous = q
+        samplers.append({"input": time_accessor, "interpolation": "LINEAR",
+                         "output": push(values, "VEC4", len(frames))})
+        channels.append({"sampler": len(samplers) - 1,
+                         "target": {"node": index, "path": "rotation"}})
+
+    # First, because viewers autoplay animation 0 and an uploaded GLB may
+    # already carry its own (a Mixamo idle, say).
+    document.setdefault("animations", []).insert(
+        0, {"name": name, "samplers": samplers, "channels": channels})
+    buffers[0]["byteLength"] = len(out)
+    return bytes(out)
 
 
 def attach_extras(document: dict[str, Any], payload: dict[str, Any]) -> None:

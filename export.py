@@ -2,8 +2,9 @@
 
 Two artifacts from one place, because they have different audiences:
 
-  build_glb()      a GLB posed in the learned end-state, with both poses and
-                   the training metadata embedded in asset.extras. For
+  build_glb()      a GLB posed in the learned end-state, carrying a looping
+                   T-pose -> learned pose -> T-pose animation, with both poses
+                   and the training metadata embedded in asset.extras. For
                    rendering, for downstream 3D tools, for a human to open.
 
   build_document() a small JSON document — bones, start pose, end pose,
@@ -31,6 +32,10 @@ from schemas import (
 #: Bump when the shape of the exported document changes, so a consumer written
 #: against an older export can say so rather than misread it.
 SCHEMA_VERSION = 1
+
+#: Seconds into the baked animation at which each pose is reached: ease out of
+#: the T-pose, hold the learned pose, ease back so the clip loops seamlessly.
+ANIMATION_TIMING = (("start", 0.0), ("end", 1.0), ("end", 2.0), ("start", 3.0))
 
 
 class ExportError(Exception):
@@ -103,11 +108,12 @@ def build_document(run, avatar, clip) -> dict[str, Any]:
 
 
 def build_glb(run, avatar, clip) -> tuple[bytes, dict[str, Any]]:
-    """A GLB posed in the end state, with both poses embedded.
+    """A GLB posed in the end state, animated, with both poses embedded.
 
-    Returns (bytes, document). The GLB's node rotations hold the END pose; the
-    START pose needs no baking because it IS the file's bind pose — a GLB can
-    only carry one static pose, and the T-pose is the one already in there.
+    Returns (bytes, document). The GLB's node rotations hold the END pose, so
+    a viewer that ignores animations still shows what was learned; the baked
+    animation moves from the START pose (the file's bind T-pose) to the END
+    pose and back, so one that plays animations shows the move itself.
     """
     if avatar.rig.format != "glb" or not avatar.rig.glb_bytes:
         raise ExportError(
@@ -128,6 +134,12 @@ def build_glb(run, avatar, clip) -> tuple[bytes, dict[str, Any]]:
             409, "no contract bones resolved in the GLB")
 
     payload = build_document(run, avatar, clip)
+
+    # Animation first: it retargets against the bind rotations, which posing
+    # overwrites.
+    keyframes = [(t, payload["poses"][which]) for which, t in ANIMATION_TIMING]
+    binary = gltf.add_pose_animation(document, binary, keyframes, bones,
+                                     name=clip.name)
     gltf.pose_glb(document, payload["poses"]["end"], bones)
 
     # Record what actually moved. A rig missing bones still exports, but the
@@ -141,6 +153,11 @@ def build_glb(run, avatar, clip) -> tuple[bytes, dict[str, Any]]:
     payload["unmapped_bones"] = [b for b in BONES if b not in bones]
     payload["bone_aliases"] = {"mixamo": dict(MIXAMO_BONE_MAP)}
     payload["posed"] = "end"
+    payload["animation"] = {
+        "name": clip.name,
+        "duration": ANIMATION_TIMING[-1][1],
+        "keyframes": [{"t": t, "pose": which} for which, t in ANIMATION_TIMING],
+    }
 
     gltf.attach_extras(document, payload)
     return gltf.write_glb(document, binary), payload

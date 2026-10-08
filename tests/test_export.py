@@ -10,6 +10,7 @@ ones a caller can act on.
 from __future__ import annotations
 
 import json
+import struct
 import threading
 
 import pytest
@@ -281,6 +282,60 @@ class TestExportGlb:
                    if posed["nodes"][i].get("rotation")
                    != original["nodes"][i].get("rotation")]
         assert changed, "no node rotation changed — the GLB is still at bind"
+
+    def test_carries_a_playable_animation(self, finished_run):
+        run, avatar, clip = finished_run
+        data, payload = export.build_glb(run, avatar, clip)
+        document, binary = gltf.read_glb(data)
+
+        animation = document["animations"][0]
+        bones = gltf.resolve_bones(document)
+        targets = {c["target"]["node"] for c in animation["channels"]}
+        assert targets == set(bones.values())
+        assert all(c["target"]["path"] == "rotation"
+                   for c in animation["channels"])
+        assert all("matrix" not in document["nodes"][i] for i in targets)
+
+        # Every accessor the animation uses must lie inside the BIN chunk.
+        assert document["buffers"][0]["byteLength"] <= len(binary)
+        for sampler in animation["samplers"]:
+            for key in ("input", "output"):
+                accessor = document["accessors"][sampler[key]]
+                view = document["bufferViews"][accessor["bufferView"]]
+                assert view["byteOffset"] + view["byteLength"] <= len(binary)
+
+        assert payload["animation"]["duration"] == 3.0
+
+    def test_animation_moves_from_bind_to_the_end_pose(self, finished_run,
+                                                       glb_bytes):
+        run, avatar, clip = finished_run
+        data, _ = export.build_glb(run, avatar, clip)
+        document, binary = gltf.read_glb(data)
+        bones = gltf.resolve_bones(document)
+        animation = document["animations"][0]
+
+        def keys(node):
+            channel = next(c for c in animation["channels"]
+                           if c["target"]["node"] == node)
+            accessor = document["accessors"][
+                animation["samplers"][channel["sampler"]]["output"]]
+            view = document["bufferViews"][accessor["bufferView"]]
+            floats = struct.unpack_from(f"<{accessor['count'] * 4}f", binary,
+                                        view["byteOffset"])
+            return [floats[i:i + 4] for i in range(0, len(floats), 4)]
+
+        def same(a, b):
+            return abs(abs(sum(x * y for x, y in zip(a, b))) - 1) < 1e-4
+
+        original, _ = gltf.read_glb(glb_bytes)
+        moved = 0
+        for node in bones.values():
+            frames = keys(node)
+            bind = gltf._node_rotation(original["nodes"][node])
+            assert same(frames[0], bind) and same(frames[-1], bind)
+            assert same(frames[1], document["nodes"][node]["rotation"])
+            moved += not same(frames[0], frames[1])
+        assert moved, "the animation never leaves the bind pose"
 
     def test_records_which_joints_were_driven(self, finished_run):
         run, avatar, clip = finished_run
