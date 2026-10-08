@@ -98,6 +98,10 @@ export const api = {
     request("/api/training/runs",
       json({ avatar_id: avatarId, target_clip_id: targetClipId, config, speed })),
 
+  // A plain link, not a fetch: the server names the file and the browser
+  // saves it.
+  exportGlbUrl: (runId) => `/api/training/runs/${runId}/export.glb`,
+
   runControl: (runId, action, body = {}) =>
     request(`/api/training/runs/${runId}/${action}`, json(body)),
 

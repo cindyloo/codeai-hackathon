@@ -176,6 +176,8 @@ button.small:active:not(:disabled) { transform: translateY(2px); }
   background: var(--brand); color: #fff;
 }
 .button.primary:hover { background: var(--brand-dark); }
+.button.ghost { background: #fff; color: var(--ink); }
+.button.ghost:hover { background: var(--brand-soft); }
 .button:active { transform: translateY(3px); box-shadow: none; }
 
 input[type="text"], input:not([type]) {

@@ -34,6 +34,11 @@ export const StepTrain = {
     const matchPercent = computed(() =>
       Math.round((latest.value?.match ?? 0) * 100));
 
+    // Only a GLB rig has a model to export; a stick figure would just 409.
+    const glbUrl = computed(() =>
+      run.value && state.avatar.rig.format === "glb"
+        ? api.exportGlbUrl(run.value.id) : null);
+
     // With every slider at zero there is nothing to earn, so the learner gets
     // no signal at all. Worth saying out loud — otherwise it just looks broken.
     const noReward = computed(() =>
@@ -133,7 +138,7 @@ export const StepTrain = {
 
     return {
       state, weights, episodesTotal, speed, history, latest, status, error, run,
-      targetPose, learnerPose, jointHeat, matchPercent, noReward, saved,
+      targetPose, learnerPose, jointHeat, matchPercent, noReward, saved, glbUrl,
       start, stop, togglePause, reset, changeSpeed, saveLearned,
       labels: state.schema.reward_labels,
       running: computed(() => status.value === "running" || status.value === "paused"),
@@ -221,6 +226,10 @@ export const StepTrain = {
                       @click="saveLearned" :disabled="saved">
                 {{ saved ? 'Saved!' : 'Save what it learned' }}
               </button>
+              <a class="button ghost" v-if="status === 'finished' && latest && glbUrl"
+                 :href="glbUrl" download>
+                Download animated GLB
+              </a>
             </div>
             <p v-if="error" class="error">{{ error }}</p>
           </div>
