@@ -7,6 +7,31 @@ const _a = new THREE.Quaternion();
 const _b = new THREE.Quaternion();
 const _out = new THREE.Quaternion();
 
+const IDENTITY = [0, 0, 0, 1];
+
+/**
+ * A clip that visibly moves. A single pose (what training saves) is one
+ * keyframe, which samples to a statue; play it as T-pose -> pose -> hold ->
+ * T-pose instead, on a loop. Timing matches ANIMATION_TIMING in export.py so
+ * the browser and the downloaded GLB perform the same move.
+ */
+export function performableClip(clip) {
+  if (clip?.keyframes?.length !== 1) return clip;
+  const pose = clip.keyframes[0].pose;
+  const rest = Object.fromEntries(Object.keys(pose).map((b) => [b, IDENTITY]));
+  return {
+    ...clip,
+    loop: true,
+    duration: 3,
+    keyframes: [
+      { t: 0, pose: rest },
+      { t: 1, pose },
+      { t: 2, pose },
+      { t: 3, pose: rest },
+    ],
+  };
+}
+
 /** Sample a clip at time `t` (seconds), interpolating between keyframes. */
 export function samplePose(clip, t) {
   const frames = clip.keyframes;

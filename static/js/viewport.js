@@ -12,7 +12,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
-import { samplePose } from "./pose.js";
+import { performableClip, samplePose } from "./pose.js";
 
 const BODY_COLOUR = 0x6c5ce7;
 const GHOST_COLOUR = 0xb6c2e1;
@@ -700,6 +700,7 @@ export class Viewport {
 
   /** Play a clip on a loop. Pass null to stop. */
   playClip(clip) {
+    clip = performableClip(clip);
     this.clip = clip;
     this.playing = Boolean(clip);
     this.clock.start();
