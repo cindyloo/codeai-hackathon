@@ -132,6 +132,7 @@ export class Viewport {
 
     if (render) {
       this.#addStudio();
+      this.#enableDragToTurn(canvas);
     } else {
       this.camera.position.set(0, 1.05, 3.3);
       this.controls = new OrbitControls(this.camera, canvas);
@@ -158,6 +159,42 @@ export class Viewport {
     if (!render) this.#addGround();
     this.#observeResize();
     this.#animate();
+  }
+
+  /**
+   * Drag across the render preview to turn the avatar, the way OrbitControls
+   * does on every other screen. It swings the camera rather than the model:
+   * GLB posing retargets through world space against the rotations read at
+   * load, so turning the model itself would skew every pose. The angle stays
+   * on top of the chosen camera motion and goes into the video; drags during
+   * a recording are ignored so the take stays steady. Double-click resets.
+   */
+  #enableDragToTurn(canvas) {
+    this.userYaw = 0;
+    let lastX = null;
+    canvas.style.cursor = "grab";
+    canvas.style.touchAction = "none";
+
+    const refresh = () => this.#updateRenderCamera(performance.now() / 1000, false);
+    canvas.addEventListener("pointerdown", (event) => {
+      if (this.captureStartedAt !== null) return;
+      lastX = event.clientX;
+      canvas.setPointerCapture(event.pointerId);
+      canvas.style.cursor = "grabbing";
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (lastX === null || this.captureStartedAt !== null) return;
+      // Same rate as OrbitControls: a drag the height of the canvas is a
+      // full turn. Dragging right swings the camera left, so the avatar
+      // turns right, with the pointer.
+      this.userYaw -= (2 * Math.PI * (event.clientX - lastX)) / canvas.clientHeight;
+      lastX = event.clientX;
+      refresh();
+    });
+    const release = () => { lastX = null; canvas.style.cursor = "grab"; };
+    canvas.addEventListener("pointerup", release);
+    canvas.addEventListener("pointercancel", release);
+    canvas.addEventListener("dblclick", () => { this.userYaw = 0; refresh(); });
   }
 
   #addStudio() {
@@ -578,6 +615,8 @@ export class Viewport {
       const eased = phase * phase * (3 - 2 * phase);
       distance *= 1.16 - 0.16 * eased;
     }
+
+    azimuth += this.userYaw ?? 0;
 
     const elevation = THREE.MathUtils.degToRad(13);
     const horizontalDistance = Math.cos(elevation) * distance;
