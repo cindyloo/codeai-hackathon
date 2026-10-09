@@ -32,6 +32,9 @@ export const state = reactive({
   // Playback speed for Play and Render, shared so the video matches the
   // preview. See PLAYBACK_SPEEDS.
   playbackSpeed: 1,
+  // Poses caught from the learner on the Train step, in sequence order.
+  // Kept across runs so one sequence can mix poses from different rewards.
+  caughtPoses: [],    // { pose, reward, from }
   error: null,
   // status: idle | running | done | error. Kept here rather than in
   // StepSketch so the download button survives navigating on to "Teach" —
@@ -89,6 +92,7 @@ export function setAvatar(avatar) {
   state.activeClip = null;
   state.behaviours = [];
   state.activeBehaviour = null;
+  state.caughtPoses = [];
   tposeGeneration++;
   state.tpose = { status: "idle", progress: 0, message: "", dataUrl: null, error: null };
 }

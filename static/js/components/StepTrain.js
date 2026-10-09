@@ -5,7 +5,7 @@
 
 import { computed, onBeforeUnmount, ref } from "vue";
 import { api } from "../api.js";
-import { characteristicPose } from "../pose.js";
+import { characteristicPose, sequenceKeyframes } from "../pose.js";
 import { isModelClip, refreshBehaviours, state } from "../store.js";
 import { AvatarCanvas } from "./AvatarCanvas.js";
 import { RewardChart } from "./RewardChart.js";
@@ -22,6 +22,11 @@ export const StepTrain = {
     const status = ref("idle"); // idle | running | paused | finished | error
     const error = ref(null);
     const saved = ref(false);
+    const sequenceName = ref("My learned dance");
+    const sequenceSaved = ref(false);
+    const previewing = ref(false);
+    const running = computed(() =>
+      status.value === "running" || status.value === "paused");
     let closeStream = null;
 
     const targetPose = computed(() =>
@@ -115,6 +120,58 @@ export const StepTrain = {
       closeStream = null;
     }
 
+    // -- pose sequence: catch poses from the learner, save them as a move --
+
+    function catchPose() {
+      if (!latest.value) return;
+      state.caughtPoses.push({
+        pose: latest.value.pose,
+        reward: latest.value.reward,
+        from: state.activeClip?.name || "",
+      });
+      sequenceSaved.value = false;
+    }
+
+    function moveCaught(index, step) {
+      const list = state.caughtPoses;
+      const to = index + step;
+      if (to < 0 || to >= list.length) return;
+      [list[index], list[to]] = [list[to], list[index]];
+      sequenceSaved.value = false;
+    }
+
+    function removeCaught(index) {
+      state.caughtPoses.splice(index, 1);
+      if (!state.caughtPoses.length) previewing.value = false;
+      sequenceSaved.value = false;
+    }
+
+    const sequenceClip = computed(() => ({
+      name: sequenceName.value.trim() || "My learned dance",
+      fps: 24,
+      loop: true,
+      keyframes: sequenceKeyframes(state.caughtPoses.map((c) => c.pose)),
+    }));
+
+    // Previewing borrows the learner's canvas, so only while nothing is
+    // training on it.
+    const previewClip = computed(() =>
+      previewing.value && !running.value && state.caughtPoses.length
+        ? sequenceClip.value : null);
+
+    async function saveSequence() {
+      if (!state.caughtPoses.length) return;
+      await api.saveBehaviour({
+        avatar_id: state.avatar.id,
+        name: sequenceClip.value.name,
+        trained: true,
+        best_reward: Math.max(...state.caughtPoses.map((c) => c.reward)),
+        clip: sequenceClip.value,
+      });
+      await refreshBehaviours();
+      sequenceSaved.value = true;
+    }
+
     async function saveLearned() {
       // Save what the avatar actually LEARNED — a single pose it reached — as
       // distinct from the clip the model imagined. That difference is the point
@@ -142,11 +199,13 @@ export const StepTrain = {
       Boolean(state.activeClip) && !isModelClip(state.activeClip));
 
     return {
+      sequenceName, sequenceSaved, previewing, previewClip,
+      catchPose, moveCaught, removeCaught, saveSequence,
       trainable, state, weights, episodesTotal, speed, history, latest, status, error, run,
       targetPose, learnerPose, jointHeat, matchPercent, noReward, saved, glbUrl,
       start, stop, togglePause, reset, changeSpeed, saveLearned,
       labels: state.schema.reward_labels,
-      running: computed(() => status.value === "running" || status.value === "paused"),
+      running,
     };
   },
   template: `
@@ -185,7 +244,9 @@ export const StepTrain = {
             <p v-if="latest?.note" class="note">{{ latest.note }}</p>
           </div>
           <AvatarCanvas :rig="state.avatar.rig" :pose="learnerPose"
-                        :jointHeat="jointHeat" label="Learner" />
+                        :clip="previewClip"
+                        :jointHeat="previewClip ? null : jointHeat"
+                        :label="previewClip ? 'Your sequence' : 'Learner'" />
         </div>
         <p class="muted legend">
           <i class="dot green"></i> joint is on target
@@ -232,6 +293,9 @@ export const StepTrain = {
               <button class="ghost" v-if="status === 'finished'" @click="reset">
                 Clear
               </button>
+              <button class="ghost" v-if="latest" @click="catchPose">
+                Catch this pose
+              </button>
               <button class="primary" v-if="status === 'finished' && latest"
                       @click="saveLearned" :disabled="saved">
                 {{ saved ? 'Saved!' : 'Save what it learned' }}
@@ -242,6 +306,45 @@ export const StepTrain = {
               </a>
             </div>
             <p v-if="error" class="error">{{ error }}</p>
+
+            <template v-if="state.caughtPoses.length">
+              <h3>Your pose sequence</h3>
+              <p class="muted">Poses you caught, in the order they'll play.
+                 Train again with different rewards and catch more to add on.</p>
+              <ol class="caught-list">
+                <li v-for="(c, i) in state.caughtPoses" :key="i">
+                  <span>
+                    <strong>Pose {{ i + 1 }}</strong>
+                    <small>{{ c.from ? c.from + ' · ' : '' }}score {{ c.reward.toFixed(2) }}</small>
+                  </span>
+                  <span class="clip-actions">
+                    <button class="ghost small" :disabled="i === 0"
+                            :aria-label="'Move pose ' + (i + 1) + ' earlier'"
+                            @click="moveCaught(i, -1)">↑</button>
+                    <button class="ghost small"
+                            :disabled="i === state.caughtPoses.length - 1"
+                            :aria-label="'Move pose ' + (i + 1) + ' later'"
+                            @click="moveCaught(i, 1)">↓</button>
+                    <button class="ghost small"
+                            :aria-label="'Remove pose ' + (i + 1)"
+                            @click="removeCaught(i)">×</button>
+                  </span>
+                </li>
+              </ol>
+              <div class="prompt-row">
+                <input v-model="sequenceName" maxlength="60"
+                       placeholder="Name your sequence" @input="sequenceSaved = false">
+                <button class="ghost" :disabled="running"
+                        :title="running ? 'Stop training to preview' : ''"
+                        @click="previewing = !previewing">
+                  {{ previewing && !running ? 'Stop preview' : 'Preview' }}
+                </button>
+                <button class="primary" :disabled="sequenceSaved"
+                        @click="saveSequence">
+                  {{ sequenceSaved ? 'Saved!' : 'Save sequence' }}
+                </button>
+              </div>
+            </template>
           </div>
 
           <div class="panel">

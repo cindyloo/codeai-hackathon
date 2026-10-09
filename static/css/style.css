@@ -573,3 +573,11 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
 .move-builder legend { font-weight: 800; padding: 0 .3rem; }
 .move-builder .pose-chip { display: inline-flex; gap: .2rem; padding: .15rem; }
 .speed-row { margin-top: .7rem; }
+
+/* -- caught pose sequence (Train) ---------------------------------------- */
+.caught-list { list-style: none; margin: .6rem 0 0; padding: 0; display: grid; gap: .4rem; }
+.caught-list li {
+  display: flex; justify-content: space-between; align-items: center; gap: .6rem;
+  border: var(--edge); border-radius: 12px; padding: .35rem .6rem; background: #fff;
+}
+.caught-list small { display: block; color: var(--muted); font-weight: 600; }

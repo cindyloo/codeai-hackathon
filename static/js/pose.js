@@ -9,6 +9,22 @@ const _out = new THREE.Quaternion();
 
 const IDENTITY = [0, 0, 0, 1];
 
+/** Seconds between poses when a sequence of them plays as a move. */
+export const POSE_SECONDS = 0.8;
+
+/**
+ * Poses in order -> keyframes, one every POSE_SECONDS. Two or more end on the
+ * first pose again so the loop doesn't snap back; a single pose stays a
+ * single keyframe, which plays as T-pose -> pose -> T-pose.
+ */
+export function sequenceKeyframes(poses) {
+  const frames = poses.map((pose, i) => ({ t: i * POSE_SECONDS, pose }));
+  if (frames.length > 1) {
+    frames.push({ t: frames.length * POSE_SECONDS, pose: frames[0].pose });
+  }
+  return frames;
+}
+
 /**
  * A clip that visibly moves. A single pose (what training saves) is one
  * keyframe, which samples to a statue; play it as T-pose -> pose -> hold ->

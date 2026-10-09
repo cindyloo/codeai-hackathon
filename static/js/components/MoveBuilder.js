@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { computed, reactive, ref } from "vue";
 import { api } from "../api.js";
+import { sequenceKeyframes } from "../pose.js";
 import { addClip, state } from "../store.js";
 
 const ARM = [
@@ -31,9 +32,6 @@ const PARTS = [
   { id: "L_leg", label: "Left leg", controls: LEG },
   { id: "R_leg", label: "Right leg", controls: LEG },
 ];
-
-//: Seconds between captured poses when they play as a move.
-const POSE_SECONDS = 0.8;
 
 function restValues() {
   return Object.fromEntries(PARTS.map((part) => [
@@ -85,14 +83,7 @@ export const MoveBuilder = {
 
     const livePose = () => emit("preview", { pose: toPose(values), clip: null });
 
-    function keyframes() {
-      const frames = poses.value.map((p, i) => ({ t: i * POSE_SECONDS, pose: toPose(p) }));
-      // Return to the first pose so the loop doesn't snap back.
-      if (frames.length > 1) {
-        frames.push({ t: frames.length * POSE_SECONDS, pose: frames[0].pose });
-      }
-      return frames;
-    }
+    const keyframes = () => sequenceKeyframes(poses.value.map(toPose));
 
     function addPose() {
       poses.value.push(copy(values));
