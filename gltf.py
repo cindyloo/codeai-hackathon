@@ -26,7 +26,7 @@ import struct
 from typing import Any
 
 from rewards import quat_mul
-from schemas import BONE_TREE, IDENTITY_QUAT, MIXAMO_BONE_MAP
+from schemas import BONE_TREE, IDENTITY_QUAT, MIXAMO_BONE_MAP, OPTIONAL_BONES
 
 _MAGIC = 0x46546C67          # 'glTF'
 _CHUNK_JSON = 0x4E4F534A     # 'JSON'
@@ -188,7 +188,8 @@ def validate_avatar_glb(data: bytes) -> dict[str, int]:
             joint_indices.add(node_index)
 
     bones = resolve_bones(document)
-    missing = [bone for bone in BONE_TREE if bone not in bones]
+    missing = [bone for bone in BONE_TREE
+               if bone not in bones and bone not in OPTIONAL_BONES]
     if missing:
         raise GlbError(f"missing required joints: {', '.join(missing)}")
 

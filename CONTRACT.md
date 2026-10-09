@@ -27,6 +27,12 @@ root
 
 The set is closed: any other bone name raises `ContractError`.
 
+A GLB rig may lack the six arm bones (`schemas.OPTIONAL_BONES`: shoulders,
+elbows, hands) — an armless character such as a tomato with legs is still an
+avatar, and poses leave the missing limbs alone. Every other bone is required.
+Training still scores against the full 16-bone figure, so an armless avatar
+can be rewarded for arm moves it cannot show.
+
 11 of the 16 are articulated (`schemas.ARTICULATED_BONES`) — training moves only
 these. Hands and feet follow their parents.
 

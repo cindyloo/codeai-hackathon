@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from providers.real.rigging import GlbError, RealRigger, rewrite_glb_joint_names
-from schemas import BONES, ProviderError
+from schemas import BONES, OPTIONAL_BONES, ProviderError
 
 REMOTE_NAMES = {
     "hips": "joint_pelvis",
@@ -35,11 +35,12 @@ def make_glb(
     *,
     missing: str | None = None,
     duplicate: str | None = None,
+    drop: frozenset[str] = frozenset(),
 ) -> bytes:
     nodes = [{"name": "joint_root"}, {"name": "joint_chest"}]
     joints = [0, 1]
     for bone in BONES:
-        if bone == missing:
+        if bone == missing or bone in drop:
             continue
         joints.append(len(nodes))
         nodes.append({"name": REMOTE_NAMES[bone]})
@@ -291,6 +292,23 @@ def test_animals_and_vehicles_get_past_classification(label):
     assert "unrecognized classification" not in caught.value.detail
 
 
+@pytest.mark.parametrize("rig_type", ["humanoid", "biped", "quadruped"])
+def test_food_characters_with_a_body_get_past_classification(rig_type):
+    # What seg_server returns for the walking broccoli and the tomato.
+    rigger, _ = rigger_with([("/mesh/upload",
+                              {"category": "other", "rig_type": rig_type})])
+    with pytest.raises(ProviderError) as caught:
+        rigger.rig_glb(b"glTF mesh", lambda *_: None)
+    assert "unrecognized classification" not in caught.value.detail
+
+
+def test_other_with_no_body_is_still_refused():
+    rigger, _ = rigger_with([("/classify",
+                              {"category": "other", "rig_type": "other"})])
+    with pytest.raises(ProviderError, match="unrecognized classification"):
+        rigger.rig(b"png", "image/png", lambda *_: None)
+
+
 def test_uploaded_glb_skips_augment_and_mesh_and_goes_to_joints():
     rigged = make_glb()
     rigger, opener = rigger_with([
@@ -499,6 +517,21 @@ def test_glb_rewriter_preserves_non_json_chunks_and_extra_nodes():
 def test_glb_rewriter_rejects_invalid_contract_skins(kwargs, message):
     with pytest.raises(GlbError, match=message):
         rewrite_glb_joint_names(make_glb(**kwargs))
+
+
+def test_glb_rewriter_accepts_an_armless_rig():
+    # seg_server rigs a tomato with legs as a biped: no shoulders, elbows or
+    # hands.
+    rewritten = rewrite_glb_joint_names(make_glb(drop=OPTIONAL_BONES))
+    names = {node["name"] for node in read_glb(rewritten)[0]["nodes"]}
+    assert names >= set(BONES) - OPTIONAL_BONES
+    assert not names & OPTIONAL_BONES
+
+
+def test_glb_rewriter_can_rename_without_verifying():
+    rewritten = rewrite_glb_joint_names(make_glb(missing="head"), verify=False)
+    names = {node["name"] for node in read_glb(rewritten)[0]["nodes"]}
+    assert "hips" in names and "head" not in names
 
 
 @pytest.mark.parametrize("mutate", [

@@ -12,7 +12,7 @@ import app as app_module
 import gltf
 import providers
 from jobs import runner
-from schemas import BONES, Rig
+from schemas import BONES, OPTIONAL_BONES, Rig
 from store import store
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mixamo-style.glb"
@@ -177,6 +177,34 @@ def test_sideload_names_the_missing_required_joint(client):
 
     assert response.status_code == 400
     assert "missing required joints: head" in response.get_json()["error"]
+
+
+def test_sideload_accepts_a_rig_without_arms(client):
+    document, binary = gltf.read_glb(FIXTURE.read_bytes())
+    bones = gltf.resolve_bones(document)
+    for bone in OPTIONAL_BONES:
+        document["nodes"][bones[bone]]["name"] = f"unmapped_{bone}"
+
+    response = post_glb(client, gltf.write_glb(document, binary))
+
+    assert response.status_code == 201
+
+
+def test_sideload_renames_seg_server_joints(client):
+    # What a rig downloaded straight from seg_server looks like.
+    document, binary = gltf.read_glb(FIXTURE.read_bytes())
+    remote = {"hips": "joint_pelvis", "spine": "joint_spine",
+              "neck": "joint_neck", "head": "joint_head"}
+    for bone, index in gltf.resolve_bones(document).items():
+        side = {"L": "left", "R": "right"}.get(bone[0]) if bone[1] == "_" else None
+        document["nodes"][index]["name"] = remote.get(
+            bone, f"joint_{bone[2:]}_{side}")
+
+    response = post_glb(client, gltf.write_glb(document, binary))
+
+    assert response.status_code == 201
+    stored = store.get_avatar(response.get_json()["id"]).rig.glb_bytes
+    assert set(gltf.resolve_bones(gltf.read_glb(stored)[0])) == set(BONES)
 
 
 def test_sideload_works_when_the_server_terminates_the_input_stream(client):

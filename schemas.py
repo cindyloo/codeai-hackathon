@@ -47,6 +47,14 @@ BONE_TREE: dict[str, tuple[str | None, tuple[float, float, float]]] = {
 BONES: list[str] = list(BONE_TREE)
 BONE_SET: frozenset[str] = frozenset(BONES)
 
+#: Bones a GLB rig may lack. An armless character (seg_server rigs a tomato
+#: with legs as a 12-joint biped) is still an avatar; poses simply leave the
+#: missing limbs alone. Every other bone must be present.
+OPTIONAL_BONES: frozenset[str] = frozenset({
+    "L_shoulder", "L_elbow", "L_hand",
+    "R_shoulder", "R_elbow", "R_hand",
+})
+
 #: Bones a learner is allowed to move during training. Feet/hands are IK-ish
 #: leaves that follow their parents; letting the policy drive them makes the
 #: search space needlessly large for no visible gain.

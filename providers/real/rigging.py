@@ -18,7 +18,7 @@ from urllib.request import Request, urlopen
 
 import config
 from providers.base import Progress, Rigger
-from schemas import BONES, ProviderError, Rig
+from schemas import BONES, OPTIONAL_BONES, ProviderError, Rig
 
 _JSON_CHUNK = b"JSON"
 _MAX_JSON_BYTES = 2 * 1024 * 1024
@@ -34,6 +34,9 @@ _FAILED_STATUSES = {"cancelled", "canceled", "error", "failed", "failure"}
 _HUMANOID_LABELS = {"biped", "human", "humanoid", "person"}
 _ANIMAL_LABELS = {"animal", "dog", "cat", "quadruped"}
 _VEHICLE_LABELS = {"car", "truck", "bike","automobile", "van"}
+# seg_server files a walking broccoli or a tomato with legs under category
+# "other" (food), but its rig_type still says it has a body we can rig.
+_WALKING_RIG_TYPES = {"humanoid", "biped", "quadruped"}
 
 # The rigging service uses semantic joint names but the Teach contract has its
 # own stable vocabulary. Matching is normalized for case and separator style;
@@ -107,8 +110,11 @@ def _normalise_joint_name(name: str) -> str:
     return name.strip().lower().replace("-", "_").replace(".", "_").replace(":", "_")
 
 
-def rewrite_glb_joint_names(glb_bytes: bytes) -> bytes:
-    """Rename remote skin joints and verify the complete Teach bone contract.
+def rewrite_glb_joint_names(glb_bytes: bytes, *, verify: bool = True) -> bytes:
+    """Rename remote skin joints and verify the Teach bone contract.
+
+    The arm bones (``OPTIONAL_BONES``) may be absent. With ``verify=False``
+    the joints are only renamed, for a caller that validates separately.
 
     Only the JSON chunk is rebuilt. BIN and extension chunks are copied
     byte-for-byte and in their original order.
@@ -190,11 +196,12 @@ def rewrite_glb_joint_names(glb_bytes: bytes) -> bytes:
         bone: indices for bone, indices in contract_nodes.items()
         if len(indices) > 1
     }
-    missing = [bone for bone, indices in contract_nodes.items() if not indices]
-    if duplicates:
+    missing = [bone for bone, indices in contract_nodes.items()
+               if not indices and bone not in OPTIONAL_BONES]
+    if verify and duplicates:
         names = ", ".join(sorted(duplicates))
         raise GlbError(f"skin has duplicate contract bones: {names}")
-    if missing:
+    if verify and missing:
         raise GlbError(f"skin is missing contract bones: {', '.join(missing)}")
 
     json_payload = json.dumps(
@@ -333,7 +340,11 @@ class RealRigger(Rigger):
     def _accepted_classify_id(self, classification: dict[str, Any]) -> str:
         """Refuse unsupported subjects; return the URL-encoded classify_id."""
         label = self._classification_label(classification)
-        if label not in _HUMANOID_LABELS and label not in _ANIMAL_LABELS and label not in _VEHICLE_LABELS:
+        rig_type = self._find_value(classification, "rig_type")
+        walks = (isinstance(rig_type, str)
+                 and rig_type.strip().lower() in _WALKING_RIG_TYPES)
+        if (not walks and label not in _HUMANOID_LABELS
+                and label not in _ANIMAL_LABELS and label not in _VEHICLE_LABELS):
             raise ProviderError(
                 "I can only wake up drawings of people, animals, and vehicles right now. Try drawing "
                 "a person, animal with a head, two arms, and two legs. Or, draw a car from the side",

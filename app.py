@@ -25,6 +25,8 @@ import providers
 from auth import RateLimiter, limiter, require_token
 from jobs import runner
 from logs import log
+from providers.real.rigging import GlbError as RemoteGlbError
+from providers.real.rigging import rewrite_glb_joint_names
 from rewards import TERM_LABELS
 from schemas import (
     BONES,
@@ -172,6 +174,15 @@ def sideload_avatar():
     glb_bytes = upload.read()
     if not glb_bytes:
         return fail("That GLB was empty.")
+
+    # A rig made by seg_server and downloaded from it names its joints
+    # `joint_hip_left` and so on; give them contract names, as the rigger does
+    # for rigs it fetches itself. Anything that isn't such a rig passes
+    # through untouched and the validation below says what is wrong with it.
+    try:
+        glb_bytes = rewrite_glb_joint_names(glb_bytes, verify=False)
+    except RemoteGlbError:
+        pass
 
     try:
         gltf.validate_avatar_glb(glb_bytes)
