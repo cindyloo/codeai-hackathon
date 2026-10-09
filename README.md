@@ -3,14 +3,16 @@
 We think engaging learners to create and train their own model is a compelling
 computational exercise and generative AI collaboration.
 
-The experience now runs end to end:
+You can draw a picture of your object or take a picture. You can also upload a GLB to train it for a new animation!
 
 ```text
-draw -> render image -> rig -> teach -> train -> play -> render a WebM video
+draw or upload -> render image -> glb or upload ->rig -> teach -> train -> play -> render a WebM video
 ```
 
 Go to the [project wiki](https://github.com/grega/codeai-hackathon/wiki) for
 background and design notes.
+
+Also see https://medium.com/@csbishopfilm/hacking-animaition-e38935e0cb27 for a deeper dive
 
 ## Setup
 
