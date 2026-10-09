@@ -13,7 +13,9 @@ export const StepSketch = {
     const error = ref(null);
     const glbBusy = ref(false);
     const hasDrawing = ref(false);
-    const uploadCleaned = ref(false);
+    // The canvas holds an uploaded photo, which must never go through the
+    // line pipeline: that traces it into black lines and drops its colours.
+    const hasPhoto = ref(false);
     const renderPrompt = ref("");
     const renderStyle = ref("animated"); // "lines" | "animated"
     const renderBusy = ref(false);
@@ -49,6 +51,7 @@ export const StepSketch = {
       undoStack.value.push({
         imageData: ctx.getImageData(0, 0, el.width, el.height),
         hadDrawing: hasDrawing.value,
+        hadPhoto: hasPhoto.value,
       });
       if (undoStack.value.length > UNDO_HISTORY_LIMIT) undoStack.value.shift();
     }
@@ -58,7 +61,7 @@ export const StepSketch = {
       if (!entry) return;
       ctx.putImageData(entry.imageData, 0, 0);
       hasDrawing.value = entry.hadDrawing;
-      uploadCleaned.value = false;
+      hasPhoto.value = entry.hadPhoto;
       clearRenderedImage();
     }
 
@@ -76,7 +79,6 @@ export const StepSketch = {
       clearRenderedImage();
       drawing = true;
       hasDrawing.value = true;
-      uploadCleaned.value = false;
       ctx.strokeStyle = tool.value === "eraser" ? "#ffffff" : "#1e293b";
       ctx.lineWidth = tool.value === "eraser" ? ERASER_WIDTH : PEN_WIDTH;
       const { x, y } = positionOf(event);
@@ -98,7 +100,7 @@ export const StepSketch = {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.value.width, canvas.value.height);
       hasDrawing.value = false;
-      uploadCleaned.value = false;
+      hasPhoto.value = false;
       clearRenderedImage();
     }
 
@@ -149,16 +151,17 @@ export const StepSketch = {
       pushUndoSnapshot();
       busy.value = true;
       error.value = null;
+      message.value = "Cutting out your photo...";
       try {
-        const { blob, cleaned } = await cleanUpDrawing(file);
-        await drawBlobToCanvas(blob);
-        // Skip cleaning it again on submit — the canvas already holds the
-        // pipeline's output (or, if the pipeline failed, the raw upload).
-        uploadCleaned.value = cleaned;
+        // Background off, colours kept. drawBlobToCanvas lays the cut-out
+        // on the canvas's white.
+        await drawBlobToCanvas(await api.cutOutPhoto(file));
+        hasPhoto.value = true;
       } catch (err) {
         error.value = err.message;
       } finally {
         busy.value = false;
+        message.value = "";
         event.target.value = "";
       }
     }
@@ -194,7 +197,7 @@ export const StepSketch = {
     async function drawingBlob(report) {
       const raw = await new Promise((resolve) =>
         canvas.value.toBlob(resolve, "image/png"));
-      return uploadCleaned.value ? raw : (await cleanUpDrawing(raw, report)).blob;
+      return hasPhoto.value ? raw : (await cleanUpDrawing(raw, report)).blob;
     }
 
     async function createAvatarFromImage(imageBlob, onProgress) {

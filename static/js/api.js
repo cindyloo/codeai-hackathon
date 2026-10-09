@@ -71,6 +71,23 @@ export const api = {
 
   getAvatar: (id) => request(`/api/avatars/${id}`),
 
+  // A photo's subject on a transparent background, as a PNG blob.
+  async cutOutPhoto(imageBlob) {
+    const form = new FormData();
+    form.append("image", imageBlob, imageBlob.name || "photo.png");
+    let response;
+    try {
+      response = await fetch("/api/cutouts", { method: "POST", body: form });
+    } catch (cause) {
+      throw new ApiError("Can't reach the server. Is it still running?", { cause });
+    }
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new ApiError(body?.error || `Something went wrong (${response.status}).`);
+    }
+    return response.blob();
+  },
+
   async renderSketch(imageBlob, prompt, style, onProgress) {
     const form = new FormData();
     form.append("image", imageBlob, "sketch.png");

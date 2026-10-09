@@ -18,6 +18,7 @@ from flask import Flask, Response, jsonify, request, send_file, send_from_direct
 
 import claude
 import config
+import cutout
 import export
 import fal_images
 import gltf
@@ -283,6 +284,23 @@ def get_avatar_glb(avatar_id: str):
 
     return Response(avatar.rig.glb_bytes, mimetype="model/gltf-binary",
                     headers={"ETag": f'"{etag}"', "Cache-Control": "no-cache"})
+
+
+@app.post("/api/cutouts")
+def cut_out_photo():
+    """A photo's subject on a transparent background, colours kept."""
+    upload = request.files.get("image")
+    if upload is None:
+        return fail("No photo was uploaded.")
+    image_bytes = upload.read()
+    if not image_bytes:
+        return fail("That photo was empty.")
+    try:
+        png = cutout.remove_background(image_bytes)
+    except cutout.CutoutError as exc:
+        return fail(exc.message, exc.status)
+    return Response(png, mimetype="image/png",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/renders")
