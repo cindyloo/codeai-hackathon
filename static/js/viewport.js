@@ -558,7 +558,8 @@ export class Viewport {
       const phase = recording
         ? Math.min(elapsedSeconds / (VIDEO_DURATION_MS / 1000), 1)
         : (elapsedSeconds % 5) / 5;
-      azimuth += Math.sin(phase * Math.PI * 2) * THREE.MathUtils.degToRad(16);
+      // A 180° arc centred on the front: profile to profile, never behind.
+      azimuth = Math.sin(phase * Math.PI * 2) * THREE.MathUtils.degToRad(90);
     } else if (this.cameraMotion === "push-in") {
       const phase = recording
         ? Math.min(elapsedSeconds / (VIDEO_DURATION_MS / 1000), 1)
