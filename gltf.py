@@ -22,6 +22,7 @@ viewport apply what it is given.
 from __future__ import annotations
 
 import json
+import math
 import struct
 from typing import Any
 
@@ -437,6 +438,164 @@ def add_pose_animation(document: dict[str, Any], binary: bytes,
         0, {"name": name, "samplers": samplers, "channels": channels})
     buffers[0]["byteLength"] = len(out)
     return bytes(out)
+
+
+# --------------------------------------------------------------------------
+# Reading animations back — the inverse of add_pose_animation
+# --------------------------------------------------------------------------
+
+#: componentType -> (struct code, normaliser). glTF allows rotation outputs as
+#: normalised integers as well as floats.
+_COMPONENTS = {
+    5126: ("f", None),
+    5120: ("b", lambda v: max(v / 127.0, -1.0)),
+    5121: ("B", lambda v: v / 255.0),
+    5122: ("h", lambda v: max(v / 32767.0, -1.0)),
+    5123: ("H", lambda v: v / 65535.0),
+}
+_WIDTH = {"SCALAR": 1, "VEC3": 3, "VEC4": 4}
+
+#: Sampling rate for imported clips. Plenty for the viewport's slerp, and
+#: keeps a 20s clip inside the contract's keyframe limit.
+IMPORT_FPS = 12
+
+
+def _read_accessor(document: dict[str, Any], binary: bytes,
+                   index: int) -> list[tuple[float, ...]]:
+    accessor = document["accessors"][index]
+    if "sparse" in accessor or "bufferView" not in accessor:
+        raise GlbError(f"accessor {index} is sparse or has no data")
+    code, normalise = _COMPONENTS[accessor["componentType"]]
+    width = _WIDTH[accessor["type"]]
+    view = document["bufferViews"][accessor["bufferView"]]
+    if view.get("buffer", 0) != 0:
+        raise GlbError(f"accessor {index} is not in the GLB's own buffer")
+
+    size = struct.calcsize(code)
+    stride = view.get("byteStride") or size * width
+    start = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+    out = []
+    for i in range(accessor["count"]):
+        values = struct.unpack_from(f"<{width}{code}", binary, start + i * stride)
+        if normalise:
+            values = tuple(normalise(v) for v in values)
+        out.append(tuple(float(v) for v in values))
+    return out
+
+
+def _slerp(a, b, alpha: float):
+    dot = sum(x * y for x, y in zip(a, b))
+    if dot < 0:
+        b, dot = tuple(-c for c in b), -dot
+    if dot > 0.9995:   # nearly parallel: nlerp is exact enough
+        q = tuple(x + (y - x) * alpha for x, y in zip(a, b))
+    else:
+        theta = math.acos(dot)
+        sa = math.sin((1 - alpha) * theta) / math.sin(theta)
+        sb = math.sin(alpha * theta) / math.sin(theta)
+        q = tuple(sa * x + sb * y for x, y in zip(a, b))
+    length = math.sqrt(sum(c * c for c in q)) or 1.0
+    return tuple(c / length for c in q)
+
+
+def _sample(times: list[float], values: list[tuple], interpolation: str,
+            t: float):
+    if interpolation == "CUBICSPLINE":
+        # Each key is (in-tangent, value, out-tangent); keep the values and
+        # interpolate those linearly — close enough at our sampling rate.
+        values = values[1::3]
+    if t <= times[0]:
+        return values[0]
+    if t >= times[-1]:
+        return values[-1]
+    i = 0
+    while times[i + 1] < t:
+        i += 1
+    if interpolation == "STEP":
+        return values[i]
+    span = times[i + 1] - times[i]
+    return _slerp(values[i], values[i + 1],
+                  (t - times[i]) / span if span > 0 else 0.0)
+
+
+def read_clips(document: dict[str, Any], binary: bytes,
+               bones: dict[str, int] | None = None) -> list[dict[str, Any]]:
+    """Every glTF animation in the file, as contract clip dicts.
+
+    Each frame is FK'd through the GLB's own node tree (so unmapped bones such
+    as a chest still carry their children), then each contract bone's world
+    rotation is turned back into a delta from bind and made local against its
+    contract parent — `pose_glb` run backwards. Only rotations come across;
+    translation (a root bob) and scale have no place in a contract pose.
+
+    Reads the node rotations as bind, so the file must be at rest — which is
+    how riggers and our own export leave it.
+    """
+    if bones is None:
+        bones = resolve_bones(document)
+    nodes = document.get("nodes", [])
+    bind_world = _bind_world_rotations(document)
+    rest_local = {i: _node_rotation(n) for i, n in enumerate(nodes)}
+    parents = _parents(document)
+    roots = [i for i in range(len(nodes)) if i not in parents]
+
+    clips = []
+    for number, animation in enumerate(document.get("animations", []) or []):
+        channels = {}
+        try:
+            for channel in animation.get("channels", []):
+                target = channel.get("target", {})
+                if target.get("path") != "rotation" or "node" not in target:
+                    continue
+                sampler = animation["samplers"][channel["sampler"]]
+                channels[target["node"]] = (
+                    [t[0] for t in _read_accessor(document, binary, sampler["input"])],
+                    _read_accessor(document, binary, sampler["output"]),
+                    sampler.get("interpolation", "LINEAR"),
+                )
+        except (GlbError, KeyError, IndexError, TypeError, struct.error):
+            continue   # one unreadable clip shouldn't cost the others
+        if not channels:
+            continue
+
+        duration = min(max(c[0][-1] for c in channels.values()), 30.0)
+        count = min(int(round(duration * IMPORT_FPS)) + 1, 240)
+        step = duration / (count - 1) if count > 1 else 0.0
+
+        keyframes = []
+        for k in range(count):
+            t = k * step
+            world: dict[int, tuple] = {}
+            stack = [(r, IDENTITY_QUAT) for r in roots]
+            while stack:
+                index, parent_world = stack.pop()
+                local = (_sample(*channels[index][:2], channels[index][2], t)
+                         if index in channels else rest_local[index])
+                world[index] = quat_mul(parent_world, local)
+                for child in nodes[index].get("children", []) or []:
+                    stack.append((child, world[index]))
+
+            deltas = {bone: quat_mul(world[index], _conjugate(bind_world[index]))
+                      for bone, index in bones.items()}
+            pose = {}
+            for bone in bones:
+                parent = BONE_TREE[bone][0]
+                q = (quat_mul(_conjugate(deltas[parent]), deltas[bone])
+                     if parent in deltas else deltas[bone])
+                pose[bone] = [round(c, 5) for c in q]
+            keyframes.append({"t": round(t, 4), "pose": pose})
+
+        if all(abs(q[3]) > 0.9999 for frame in keyframes
+               for q in frame["pose"].values()):
+            continue   # drives nothing we can show (e.g. only fingers)
+
+        clips.append({
+            "name": (animation.get("name") or f"Move {number + 1}").strip(),
+            "fps": IMPORT_FPS,
+            "loop": True,
+            "keyframes": keyframes,
+        })
+    return clips
 
 
 def attach_extras(document: dict[str, Any], payload: dict[str, Any]) -> None:

@@ -6,7 +6,7 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import { api } from "../api.js";
 import { characteristicPose } from "../pose.js";
-import { refreshBehaviours, state } from "../store.js";
+import { isModelClip, refreshBehaviours, state } from "../store.js";
 import { AvatarCanvas } from "./AvatarCanvas.js";
 import { RewardChart } from "./RewardChart.js";
 
@@ -136,8 +136,13 @@ export const StepTrain = {
 
     onBeforeUnmount(stopStream);
 
+    // A built-in move can be selected on Teach to preview it, but it is
+    // played, not trained.
+    const trainable = computed(() =>
+      Boolean(state.activeClip) && !isModelClip(state.activeClip));
+
     return {
-      state, weights, episodesTotal, speed, history, latest, status, error, run,
+      trainable, state, weights, episodesTotal, speed, history, latest, status, error, run,
       targetPose, learnerPose, jointHeat, matchPercent, noReward, saved, glbUrl,
       start, stop, togglePause, reset, changeSpeed, saveLearned,
       labels: state.schema.reward_labels,
@@ -152,8 +157,13 @@ export const StepTrain = {
            keeps the ones that earn points. You decide what earns points.</p>
       </header>
 
-      <div v-if="!state.activeClip" class="placeholder">
-        <p>Pick a move on the previous step first.</p>
+      <div v-if="!trainable" class="placeholder">
+        <p v-if="state.activeClip">
+          "{{ state.activeClip.name }}" came built into your model, so it
+          already knows it — find it on the Play step. Make a new move on the
+          previous step to train.
+        </p>
+        <p v-else>Pick a move on the previous step first.</p>
       </div>
 
       <template v-else>

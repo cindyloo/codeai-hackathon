@@ -45,11 +45,22 @@ export function goTo(step) {
   if (canEnter(step)) state.step = step;
 }
 
+/**
+ * A move that came inside the avatar's GLB. It is already a finished
+ * animation, so it is played, never trained — training toward it would only
+ * give back a worse copy.
+ */
+export function isModelClip(clip) {
+  return Boolean(clip && state.avatar?.clips?.some((c) => c.id === clip.id));
+}
+
 /** Steps unlock in order — you can't train a move you haven't made yet. */
 export function canEnter(step) {
   if (step === "sketch") return true;
   if (step === "pose") return Boolean(state.avatar);
-  if (step === "train") return Boolean(state.avatar && state.clips.length);
+  if (step === "train") {
+    return Boolean(state.avatar && state.clips.some((c) => !isModelClip(c)));
+  }
   if (step === "play") return Boolean(state.avatar);
   if (step === "render") {
     return Boolean(state.avatar && state.behaviours.length);
@@ -63,7 +74,8 @@ let tposeGeneration = 0;
 
 export function setAvatar(avatar) {
   state.avatar = avatar;
-  state.clips = [];
+  // Animations that came inside the avatar's GLB are moves from the start.
+  state.clips = [...(avatar.clips || [])];
   state.activeClip = null;
   state.behaviours = [];
   state.activeBehaviour = null;

@@ -2,7 +2,7 @@
 
 import { ref } from "vue";
 import { api } from "../api.js";
-import { addClip, goTo, refreshBehaviours, state } from "../store.js";
+import { addClip, goTo, isModelClip, refreshBehaviours, state } from "../store.js";
 import { AvatarCanvas } from "./AvatarCanvas.js";
 
 const SUGGESTIONS = [
@@ -51,8 +51,12 @@ export const StepPose = {
       setTimeout(() => { saved.value = null; }, 1800);
     }
 
+    // Built-in moves are saved as behaviours when the avatar loads and are
+    // never trained, so they get neither button.
+    const fromModel = isModelClip;
+
     return {
-      prompt, busy, progress, message, error, state, saved,
+      prompt, busy, progress, message, error, state, saved, fromModel,
       SUGGESTIONS, generate, saveAsBehaviour, goTo,
       select: (clip) => { state.activeClip = clip; },
       use: (text) => { prompt.value = text; generate(); },
@@ -95,14 +99,18 @@ export const StepPose = {
                 @click="select(clip)">
               <div>
                 <strong>{{ clip.name }}</strong>
-                <small>{{ clip.keyframes.length }} poses ·
+                <small>{{ fromModel(clip) ? 'from your model · ' : '' }}{{ clip.keyframes.length }} poses ·
                        {{ clip.duration.toFixed(1) }}s</small>
               </div>
               <div class="clip-actions">
-                <button class="ghost small" @click.stop="saveAsBehaviour(clip)">
+                <button v-if="!fromModel(clip)" class="ghost small"
+                        @click.stop="saveAsBehaviour(clip)">
                   {{ saved === clip.id ? 'Saved!' : 'Save' }}
                 </button>
-                <button class="primary small" @click.stop="select(clip); goTo('train')">
+                <!-- A built-in move is already a finished animation; training
+                     toward it would only give back a worse copy. -->
+                <button v-if="!fromModel(clip)" class="primary small"
+                        @click.stop="select(clip); goTo('train')">
                   Train it
                 </button>
               </div>

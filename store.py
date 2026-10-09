@@ -26,6 +26,8 @@ class Avatar:
     rig: Rig
     image_path: str | None = None
     name: str = "My avatar"
+    #: Animations that came inside the avatar's GLB, as contract clips.
+    clips: list[Clip] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         glb_url = f"/api/avatars/{self.id}/glb" if self.rig.format == "glb" else None
@@ -34,6 +36,7 @@ class Avatar:
             "name": self.name,
             "image_url": f"/api/avatars/{self.id}/image" if self.image_path else None,
             "rig": self.rig.to_json(glb_url=glb_url),
+            "clips": [clip.to_json() for clip in self.clips],
         }
 
 
@@ -48,6 +51,9 @@ class Behaviour:
     avatar_id: str
     trained: bool = False
     best_reward: float = 0.0
+    #: "taught" (made on the Teach step or learned in training) or "model"
+    #: (an animation that came inside the avatar's GLB).
+    source: str = "taught"
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -56,6 +62,7 @@ class Behaviour:
             "avatar_id": self.avatar_id,
             "trained": self.trained,
             "best_reward": self.best_reward,
+            "source": self.source,
             "clip": self.clip.to_json(),
         }
 
@@ -102,10 +109,11 @@ class Store:
 
     # -- behaviours ------------------------------------------------------
     def add_behaviour(self, name: str, clip: Clip, avatar_id: str,
-                      trained: bool = False, best_reward: float = 0.0) -> Behaviour:
+                      trained: bool = False, best_reward: float = 0.0,
+                      source: str = "taught") -> Behaviour:
         behaviour = Behaviour(id=new_id("bhv"), name=name, clip=clip,
                               avatar_id=avatar_id, trained=trained,
-                              best_reward=best_reward)
+                              best_reward=best_reward, source=source)
         with self._lock:
             self.behaviours[behaviour.id] = behaviour
         return behaviour

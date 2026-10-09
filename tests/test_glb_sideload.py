@@ -12,6 +12,7 @@ import app as app_module
 import gltf
 import providers
 from jobs import runner
+from rewards import quat_from_euler
 from schemas import BONES, OPTIONAL_BONES, Rig
 from store import store
 
@@ -205,6 +206,37 @@ def test_sideload_renames_seg_server_joints(client):
     assert response.status_code == 201
     stored = store.get_avatar(response.get_json()["id"]).rig.glb_bytes
     assert set(gltf.resolve_bones(gltf.read_glb(stored)[0])) == set(BONES)
+
+
+def animated_fixture(name="walk"):
+    document, binary = gltf.read_glb(FIXTURE.read_bytes())
+    bones = gltf.resolve_bones(document)
+    up = {"L_shoulder": list(quat_from_euler(0, 0, -90))}
+    binary = gltf.add_pose_animation(
+        document, binary, [(0.0, {}), (1.0, up), (2.0, {})], bones, name=name)
+    return gltf.write_glb(document, binary)
+
+
+def test_sideload_imports_the_glbs_animations_as_moves(client):
+    response = post_glb(client, animated_fixture())
+
+    assert response.status_code == 201
+    avatar = response.get_json()
+    [clip] = avatar["clips"]
+    assert clip["name"] == "Walk"
+    assert clip["loop"] is True
+    assert clip["duration"] == 2.0
+    assert store.get_clip(clip["id"]) is not None
+
+    behaviours = client.get(f"/api/behaviours?avatar_id={avatar['id']}").get_json()
+    [behaviour] = behaviours["behaviours"]
+    assert behaviour["source"] == "model"
+    assert behaviour["trained"] is False
+
+
+def test_sideload_without_animations_has_no_moves(client):
+    response = post_glb(client, FIXTURE.read_bytes())
+    assert response.get_json()["clips"] == []
 
 
 def test_sideload_works_when_the_server_terminates_the_input_stream(client):

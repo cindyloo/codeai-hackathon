@@ -47,6 +47,7 @@ export const StepPlayground = {
                     @click="play(b)">
               <strong>{{ b.name }}</strong>
               <small v-if="b.trained">learned · best {{ b.best_reward.toFixed(2) }}</small>
+              <small v-else-if="b.source === 'model'">from your model</small>
               <small v-else>imagined</small>
             </button>
           </div>

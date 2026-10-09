@@ -107,7 +107,7 @@ MOCK_RIG_GLB=tests/fixtures/mixamo-style.glb flask --app app run
 | Bone names either `schemas.BONES` or Mixamo convention | Resolved by contract name first, then `MIXAMO_BONE_MAP` |
 | Any per-bone local axes | The browser reads each bone's bind rotation and retargets through world space, so `+Y`-down-the-limb rigs work unchanged |
 | Any scale/units | Normalised to ~1.55 units tall on load; centimetre exports are fine |
-| Baked animations | Ignored (no mixer is created). They'd fight the trainer for control of the bones |
+| Baked animations | Imported as moves (`gltf.read_clips`): each becomes a clip on Teach and a "from your model" behaviour on Play. Rotations only — root translation (a bob) is dropped. The viewport never plays them directly, so they can't fight the trainer for the bones |
 
 ### Two traps, both of which load cleanly and then move wrongly
 

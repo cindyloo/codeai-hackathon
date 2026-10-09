@@ -266,22 +266,21 @@ class TestExportGlb:
 
         document, _ = gltf.read_glb(data)
         embedded = document["asset"]["extras"]["avatarTrainer"]
-        assert embedded["posed"] == "end"
+        assert embedded["posed"] == "start"
         assert embedded["poses"]["end"] == payload["poses"]["end"]
         assert embedded["schema_version"] == export.SCHEMA_VERSION
 
-    def test_node_rotations_hold_the_end_pose(self, finished_run, glb_bytes):
-        """The file should render posed without anyone reading extras."""
+    def test_node_rotations_stay_at_bind(self, finished_run, glb_bytes):
+        """Loading the file back must find the T-pose as its rest pose."""
         run, avatar, clip = finished_run
         data, _ = export.build_glb(run, avatar, clip)
 
         original, _ = gltf.read_glb(glb_bytes)
-        posed, _ = gltf.read_glb(data)
-        bones = gltf.resolve_bones(posed)
-        changed = [b for b, i in bones.items()
-                   if posed["nodes"][i].get("rotation")
-                   != original["nodes"][i].get("rotation")]
-        assert changed, "no node rotation changed — the GLB is still at bind"
+        exported, _ = gltf.read_glb(data)
+        for index in gltf.resolve_bones(exported).values():
+            a = gltf._node_rotation(original["nodes"][index])
+            b = gltf._node_rotation(exported["nodes"][index])
+            assert abs(abs(sum(x * y for x, y in zip(a, b))) - 1) < 1e-5
 
     def test_carries_a_playable_animation(self, finished_run):
         run, avatar, clip = finished_run
@@ -328,14 +327,28 @@ class TestExportGlb:
             return abs(abs(sum(x * y for x, y in zip(a, b))) - 1) < 1e-4
 
         original, _ = gltf.read_glb(glb_bytes)
+        posed, _ = gltf.read_glb(glb_bytes)
+        gltf.pose_glb(posed, export.final_pose(run))
         moved = 0
         for node in bones.values():
             frames = keys(node)
             bind = gltf._node_rotation(original["nodes"][node])
             assert same(frames[0], bind) and same(frames[-1], bind)
-            assert same(frames[1], document["nodes"][node]["rotation"])
+            assert same(frames[1], gltf._node_rotation(posed["nodes"][node]))
             moved += not same(frames[0], frames[1])
         assert moved, "the animation never leaves the bind pose"
+
+    def test_reimporting_recovers_the_learned_pose(self, finished_run):
+        run, avatar, clip = finished_run
+        data, _ = export.build_glb(run, avatar, clip)
+        document, binary = gltf.read_glb(data)
+
+        imported = gltf.read_clips(document, binary)[0]
+        assert imported["name"] == f"{clip.name} (learned)"
+        peak = next(k for k in imported["keyframes"] if k["t"] == 1.0)
+        for bone, q in export.final_pose(run).items():
+            got = peak["pose"][bone]
+            assert abs(abs(sum(x * y for x, y in zip(q, got))) - 1) < 1e-3, bone
 
     def test_records_which_joints_were_driven(self, finished_run):
         run, avatar, clip = finished_run

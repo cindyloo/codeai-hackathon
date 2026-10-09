@@ -2,10 +2,11 @@
 
 Two artifacts from one place, because they have different audiences:
 
-  build_glb()      a GLB posed in the learned end-state, carrying a looping
-                   T-pose -> learned pose -> T-pose animation, with both poses
-                   and the training metadata embedded in asset.extras. For
-                   rendering, for downstream 3D tools, for a human to open.
+  build_glb()      the avatar's GLB carrying a looping T-pose -> learned
+                   pose -> T-pose animation, with both poses and the training
+                   metadata embedded in asset.extras. For rendering, for
+                   downstream 3D tools, for a human to open — and for loading
+                   back into the app, which imports its animations as moves.
 
   build_document() a small JSON document — bones, start pose, end pose,
                    provenance. This is what the animation step should be given.
@@ -108,12 +109,13 @@ def build_document(run, avatar, clip) -> dict[str, Any]:
 
 
 def build_glb(run, avatar, clip) -> tuple[bytes, dict[str, Any]]:
-    """A GLB posed in the end state, animated, with both poses embedded.
+    """The avatar's GLB with the learned move baked in as an animation.
 
-    Returns (bytes, document). The GLB's node rotations hold the END pose, so
-    a viewer that ignores animations still shows what was learned; the baked
-    animation moves from the START pose (the file's bind T-pose) to the END
-    pose and back, so one that plays animations shows the move itself.
+    Returns (bytes, document). The animation moves from the START pose (the
+    file's bind T-pose) to the END pose and back. The node rotations stay at
+    bind: anything that reads a rig — this app included, when the file is
+    loaded back — takes them as the rest pose, so baking the end pose into
+    them would offset every later move by it.
     """
     if avatar.rig.format != "glb" or not avatar.rig.glb_bytes:
         raise ExportError(
@@ -135,12 +137,12 @@ def build_glb(run, avatar, clip) -> tuple[bytes, dict[str, Any]]:
 
     payload = build_document(run, avatar, clip)
 
-    # Animation first: it retargets against the bind rotations, which posing
-    # overwrites.
+    # Named as "Save what it learned" names it, so loading the file back
+    # doesn't give two moves called "Walk" when the rig brought its own.
+    name = f"{clip.name} (learned)"
     keyframes = [(t, payload["poses"][which]) for which, t in ANIMATION_TIMING]
     binary = gltf.add_pose_animation(document, binary, keyframes, bones,
-                                     name=clip.name)
-    gltf.pose_glb(document, payload["poses"]["end"], bones)
+                                     name=name)
 
     # Record what actually moved. A rig missing bones still exports, but the
     # consumer should be able to tell which joints were driven and which were
@@ -152,9 +154,9 @@ def build_glb(run, avatar, clip) -> tuple[bytes, dict[str, Any]]:
     }
     payload["unmapped_bones"] = [b for b in BONES if b not in bones]
     payload["bone_aliases"] = {"mixamo": dict(MIXAMO_BONE_MAP)}
-    payload["posed"] = "end"
+    payload["posed"] = "start"
     payload["animation"] = {
-        "name": clip.name,
+        "name": name,
         "duration": ANIMATION_TIMING[-1][1],
         "keyframes": [{"t": t, "pose": which} for which, t in ANIMATION_TIMING],
     }

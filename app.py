@@ -31,6 +31,7 @@ from rewards import TERM_LABELS
 from schemas import (
     BONES,
     Clip,
+    ContractError,
     ProviderError,
     Rig,
     TrainConfig,
@@ -132,6 +133,40 @@ def get_schema():
 # Phase 1 — rendered image to rigged avatar
 # --------------------------------------------------------------------------
 
+def _add_avatar(rig: Rig, **kwargs):
+    """Store an avatar, with any animations its GLB carries as ready moves.
+
+    A rigger's GLB may come with clips of its own (seg_server bakes idle,
+    walk and wave), and one exported from here carries the move it learned.
+    Each becomes a clip the Teach step can train toward and a behaviour the
+    Play step can perform. A clip that won't convert is skipped, not fatal.
+    """
+    avatar = store.add_avatar(rig, **kwargs)
+    if rig.format != "glb":
+        return avatar
+    try:
+        document, binary = gltf.read_glb(rig.glb_bytes)
+        found = gltf.read_clips(document, binary)
+    except gltf.GlbError as exc:
+        log(f"[avatar] {avatar.id}: couldn't read its animations: {exc}")
+        return avatar
+
+    for raw in found:
+        raw["name"] = raw["name"][:1].upper() + raw["name"][1:]
+        try:
+            clip = store.add_clip(validate_clip(raw))
+        except ContractError as exc:
+            log(f"[avatar] {avatar.id}: skipped animation {raw['name']!r}: {exc}")
+            continue
+        avatar.clips.append(clip)
+        store.add_behaviour(name=clip.name, clip=clip, avatar_id=avatar.id,
+                            source="model")
+    if avatar.clips:
+        log(f"[avatar] {avatar.id}: imported "
+            f"{', '.join(c.name for c in avatar.clips)} from its GLB")
+    return avatar
+
+
 @app.post("/api/avatars")
 def create_avatar():
     upload = request.files.get("image")
@@ -147,7 +182,7 @@ def create_avatar():
 
     def work(progress):
         rig = validate_rig(rigger.rig(image_bytes, mime, progress))
-        avatar = store.add_avatar(rig, image_bytes=image_bytes, mime=mime)
+        avatar = _add_avatar(rig, image_bytes=image_bytes, mime=mime)
         return avatar.to_json()
 
     job = runner.submit(work, message="Waking up your avatar...")
@@ -199,7 +234,7 @@ def sideload_avatar():
         glb_bytes=glb_bytes,
         notes="Sideloaded rigged GLB.",
     ))
-    avatar = store.add_avatar(rig)
+    avatar = _add_avatar(rig)
     return jsonify(avatar.to_json()), 201
 
 
@@ -208,7 +243,7 @@ def _auto_rig_glb(glb_bytes: bytes):
 
     def work(progress):
         rig = validate_rig(rigger.rig_glb(glb_bytes, progress))
-        avatar = store.add_avatar(rig)
+        avatar = _add_avatar(rig)
         return avatar.to_json()
 
     job = runner.submit(work, message="Adding a skeleton to your model...")

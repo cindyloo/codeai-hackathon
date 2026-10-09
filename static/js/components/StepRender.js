@@ -178,7 +178,8 @@ export const StepRender = {
                       :class="{ active: selected?.id === behaviour.id }"
                       @click="selectBehaviour(behaviour)">
                 <strong>{{ behaviour.name }}</strong>
-                <small>{{ behaviour.trained ? 'learned' : 'imagined' }}</small>
+                <small>{{ behaviour.trained ? 'learned'
+                  : behaviour.source === 'model' ? 'from your model' : 'imagined' }}</small>
               </button>
             </div>
           </fieldset>
