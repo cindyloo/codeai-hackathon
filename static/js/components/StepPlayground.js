@@ -8,6 +8,7 @@
 
 import { onMounted } from "vue";
 import {
+  PLAYBACK_SPEEDS,
   goTo,
   refreshBehaviours,
   setActiveBehaviour,
@@ -21,6 +22,7 @@ export const StepPlayground = {
     onMounted(refreshBehaviours);
 
     return {
+      PLAYBACK_SPEEDS,
       state,
       play: setActiveBehaviour,
       render: () => goTo("render"),
@@ -59,7 +61,15 @@ export const StepPlayground = {
         <div class="panel">
           <AvatarCanvas :rig="state.avatar.rig"
                         :clip="state.activeBehaviour?.clip"
+                        :speed="state.playbackSpeed"
                         :label="state.activeBehaviour?.name || 'Standing by'" />
+          <div class="render-segmented four speed-row" role="group" aria-label="Speed">
+            <button v-for="item in PLAYBACK_SPEEDS" :key="item.value"
+                    :class="{ active: state.playbackSpeed === item.value }"
+                    @click="state.playbackSpeed = item.value">
+              {{ item.label }}
+            </button>
+          </div>
         </div>
       </div>
     </section>

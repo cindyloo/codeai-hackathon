@@ -407,6 +407,20 @@ def create_pose(avatar_id: str):
     return jsonify(job.to_json()), 202
 
 
+@app.post("/api/clips")
+def create_clip():
+    """Store a move built by hand on the Teach step's sliders."""
+    body = request.json or {}
+    if not (body.get("name") or "").strip():
+        return fail("Give your move a name.")
+    try:
+        clip = validate_clip({**body, "name": body["name"].strip()[:60]})
+    except ContractError as exc:
+        log(f"[clips] rejected a hand-built move: {exc}")
+        return fail("That move couldn't be saved — try adding a pose first.")
+    return jsonify(store.add_clip(clip).to_json()), 201
+
+
 @app.get("/api/clips/<clip_id>")
 def get_clip(clip_id: str):
     clip = store.get_clip(clip_id)

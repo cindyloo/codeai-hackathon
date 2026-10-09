@@ -110,6 +110,9 @@ export const api = {
 
   getClip: (id) => request(`/api/clips/${id}`),
 
+  // A move built by hand on the Teach step's sliders.
+  createClip: (clip) => request("/api/clips", json(clip)),
+
   // -- phases 3 & 4 ---------------------------------------------------
   startRun: (avatarId, targetClipId, config, speed = 1) =>
     request("/api/training/runs",

@@ -361,6 +361,7 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .render-segmented.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.render-segmented.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .tool-toggle { display: inline-flex; gap: .35rem; }
 .tool-toggle button {
   width: 2.2rem; height: 2.2rem; padding: 0; border-radius: 10px;
@@ -563,3 +564,12 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
     transition: none !important;
   }
 }
+
+/* -- move builder -------------------------------------------------------- */
+.move-builder fieldset {
+  border: var(--edge); border-radius: var(--radius); margin: .7rem 0 0;
+  padding: .3rem .9rem .4rem;
+}
+.move-builder legend { font-weight: 800; padding: 0 .3rem; }
+.move-builder .pose-chip { display: inline-flex; gap: .2rem; padding: .15rem; }
+.speed-row { margin-top: .7rem; }

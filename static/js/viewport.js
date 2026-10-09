@@ -98,6 +98,9 @@ export class Viewport {
     this.paused = false;
     this.disposed = false;
     this.captureStartedAt = null;
+    // How fast the clip plays. Only the move speeds up: the camera keeps its
+    // own pace, and a recording stays the same length.
+    this.speed = 1;
     this.cameraMotion = "orbit";
     this.cameraTarget = new THREE.Vector3(0, 1, 0);
     this.baseDistance = 4;
@@ -524,6 +527,11 @@ export class Viewport {
     if (this.renderMode) this.#updateRenderCamera(0, true);
   }
 
+  setSpeed(speed) {
+    const value = Number(speed);
+    if (Number.isFinite(value) && value > 0) this.speed = value;
+  }
+
   setPaused(paused) {
     this.paused = paused;
     if (!paused) this.clock.getDelta();
@@ -554,7 +562,10 @@ export class Viewport {
     let azimuth = baseAzimuth;
     let distance = this.baseDistance;
 
-    if (this.cameraMotion === "orbit") {
+    if (this.cameraMotion === "still") {
+      // Straight on, as every other screen shows the avatar.
+      azimuth = 0;
+    } else if (this.cameraMotion === "orbit") {
       const phase = recording
         ? Math.min(elapsedSeconds / (VIDEO_DURATION_MS / 1000), 1)
         : (elapsedSeconds % 5) / 5;
@@ -804,10 +815,10 @@ export class Viewport {
     const delta = this.clock.getDelta();
     if (this.captureStartedAt !== null) {
       this.elapsed = Math.max(0, (now - this.captureStartedAt) / 1000);
-      if (this.clip) this.applyPose(samplePose(this.clip, this.elapsed));
+      if (this.clip) this.applyPose(samplePose(this.clip, this.elapsed * this.speed));
       this.#updateRenderCamera(this.elapsed, true);
     } else if (!this.paused && this.playing && this.clip) {
-      this.elapsed += delta;
+      this.elapsed += delta * this.speed;
       this.applyPose(samplePose(this.clip, this.elapsed));
       if (!this.clip.loop && this.elapsed >= this.clip.duration) this.playing = false;
     }

@@ -8,6 +8,7 @@ import {
 
 import { recordCanvas } from "../recorder.js";
 import {
+  PLAYBACK_SPEEDS,
   refreshBehaviours,
   setActiveBehaviour,
   state,
@@ -68,6 +69,7 @@ export const StepRender = {
 
         viewport = new Viewport(canvas.value, { render: true });
         await viewport.setRig(state.avatar.rig);
+        viewport.setSpeed(state.playbackSpeed);
         viewport.playClip(loopingClip(selected.value?.clip));
         viewport.setScenePreset(preset.value);
         viewport.setCameraMotion(cameraMotion.value);
@@ -97,6 +99,11 @@ export const StepRender = {
     function selectCamera(id) {
       cameraMotion.value = id;
       viewport?.setCameraMotion(id);
+    }
+
+    function selectSpeed(value) {
+      state.playbackSpeed = value;
+      viewport?.setSpeed(value);
     }
 
     function togglePaused() {
@@ -136,6 +143,7 @@ export const StepRender = {
 
     return {
       CAMERA_MOTIONS,
+      PLAYBACK_SPEEDS,
       PRESETS,
       VIDEO_HEIGHT,
       VIDEO_WIDTH,
@@ -155,6 +163,7 @@ export const StepRender = {
       resultUrl,
       selectBehaviour,
       selectCamera,
+      selectSpeed,
       selected,
       state,
       togglePaused,
@@ -205,6 +214,18 @@ export const StepRender = {
                       :key="item.id"
                       :class="{ active: cameraMotion === item.id }"
                       @click="selectCamera(item.id)">
+                {{ item.label }}
+              </button>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Speed</legend>
+            <div class="render-segmented two">
+              <button v-for="item in PLAYBACK_SPEEDS"
+                      :key="item.value"
+                      :class="{ active: state.playbackSpeed === item.value }"
+                      @click="selectSpeed(item.value)">
                 {{ item.label }}
               </button>
             </div>

@@ -4,6 +4,7 @@ import { ref } from "vue";
 import { api } from "../api.js";
 import { addClip, goTo, isModelClip, refreshBehaviours, state } from "../store.js";
 import { AvatarCanvas } from "./AvatarCanvas.js";
+import { MoveBuilder } from "./MoveBuilder.js";
 
 const SUGGESTIONS = [
   "waves arms in the air",
@@ -16,7 +17,7 @@ const SUGGESTIONS = [
 ];
 
 export const StepPose = {
-  components: { AvatarCanvas },
+  components: { AvatarCanvas, MoveBuilder },
   setup() {
     const prompt = ref("waves arms in the air");
     const busy = ref(false);
@@ -24,6 +25,10 @@ export const StepPose = {
     const message = ref("");
     const error = ref(null);
     const saved = ref(null);
+    // Building a move by hand takes over the canvas: it shows the sliders'
+    // live pose, or the captured poses when the builder plays them.
+    const building = ref(false);
+    const builderPreview = ref({ pose: null, clip: null });
 
     async function generate() {
       if (!prompt.value.trim() || busy.value) return;
@@ -57,8 +62,10 @@ export const StepPose = {
 
     return {
       prompt, busy, progress, message, error, state, saved, fromModel,
-      SUGGESTIONS, generate, saveAsBehaviour, goTo,
-      select: (clip) => { state.activeClip = clip; },
+      SUGGESTIONS, generate, saveAsBehaviour, goTo, building, builderPreview,
+      select: (clip) => { building.value = false; state.activeClip = clip; },
+      startBuilding: () => { building.value = true; },
+      builderSaved: () => { building.value = false; },
       use: (text) => { prompt.value = text; generate(); },
     };
   },
@@ -92,6 +99,18 @@ export const StepPose = {
           </div>
           <p v-if="error" class="error">{{ error }}</p>
 
+          <div class="row">
+            <button v-if="!building" class="ghost" @click="startBuilding">
+              Build a move by hand
+            </button>
+            <button v-else class="ghost" @click="building = false">
+              Close the builder
+            </button>
+          </div>
+          <MoveBuilder v-if="building"
+                       @preview="builderPreview = $event"
+                       @saved="builderSaved" />
+
           <h3 v-if="state.clips.length">Moves you've made</h3>
           <ul class="clip-list">
             <li v-for="clip in state.clips" :key="clip.id"
@@ -119,9 +138,16 @@ export const StepPose = {
         </div>
 
         <div class="panel">
-          <AvatarCanvas :rig="state.avatar.rig" :clip="state.activeClip"
+          <AvatarCanvas v-if="building" :rig="state.avatar.rig"
+                        :pose="builderPreview.pose" :clip="builderPreview.clip"
+                        :label="builderPreview.clip ? 'Your poses' : 'Sliders'" />
+          <AvatarCanvas v-else :rig="state.avatar.rig" :clip="state.activeClip"
                         :label="state.activeClip ? state.activeClip.name : 'Waiting'" />
-          <p class="muted" v-if="!state.activeClip">
+          <p class="muted" v-if="building">
+            Move the sliders to pose your avatar, then add the pose. Add a few
+            to make it move.
+          </p>
+          <p class="muted" v-else-if="!state.activeClip">
             Make a move and it'll play here on a loop.
           </p>
           <p class="muted" v-else>

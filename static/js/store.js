@@ -12,6 +12,13 @@ export const STEPS = [
   { id: "render", label: "Render", hint: "Make a video" },
 ];
 
+export const PLAYBACK_SPEEDS = [
+  { value: 0.5, label: "Slow" },
+  { value: 1, label: "Normal" },
+  { value: 1.5, label: "Fast" },
+  { value: 2, label: "Super fast" },
+];
+
 export const state = reactive({
   ready: false,
   schema: null,       // bone names, rest pose, reward labels — from GET /api/schema
@@ -22,6 +29,9 @@ export const state = reactive({
   activeClip: null,   // the one being previewed / trained
   behaviours: [],
   activeBehaviour: null,
+  // Playback speed for Play and Render, shared so the video matches the
+  // preview. See PLAYBACK_SPEEDS.
+  playbackSpeed: 1,
   error: null,
   // status: idle | running | done | error. Kept here rather than in
   // StepSketch so the download button survives navigating on to "Teach" —

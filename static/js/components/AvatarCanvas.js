@@ -12,6 +12,7 @@ export const AvatarCanvas = {
     ghostPose: { type: Object, default: null },// translucent comparison figure
     jointHeat: { type: Object, default: null },// bone -> 0..1 error, tints limbs
     label: { type: String, default: "" },
+    speed: { type: Number, default: 1 },       // clip playback rate
   },
   setup(props) {
     const canvas = ref(null);
@@ -20,6 +21,7 @@ export const AvatarCanvas = {
     onMounted(async () => {
       viewport = new Viewport(canvas.value, { ghost: true });
       await viewport.setRig(props.rig);
+      viewport.setSpeed(props.speed);
       if (props.clip) viewport.playClip(props.clip);
       else if (props.pose) viewport.applyPose(props.pose);
       if (props.ghostPose) viewport.setGhostPose(props.ghostPose);
@@ -31,11 +33,16 @@ export const AvatarCanvas = {
     watch(() => props.rig, async (rig) => {
       if (viewport && rig) await viewport.setRig(rig);
     });
-    watch(() => props.clip, (clip) => viewport?.playClip(clip));
+    watch(() => props.clip, (clip) => {
+      viewport?.playClip(clip);
+      // Dropping back from a clip to a pose: show the pose again.
+      if (!clip && props.pose) viewport?.applyPose(props.pose);
+    });
     watch(() => props.pose, (pose) => {
       // A clip is animating; a static pose would fight it for control.
       if (pose && !props.clip) viewport?.applyPose(pose);
     });
+    watch(() => props.speed, (speed) => viewport?.setSpeed(speed));
     watch(() => props.ghostPose, (pose) => viewport?.setGhostPose(pose));
     watch(() => props.jointHeat, (heat) => {
       if (heat) viewport.setJointHeat(heat);
