@@ -13,6 +13,15 @@ Go to the [project wiki](https://github.com/grega/codeai-hackathon/wiki) for
 background and design notes.
 
 Also see https://medium.com/@csbishopfilm/hacking-animaition-e38935e0cb27 for a deeper dive
+<img width="1326" height="794" alt="Screenshot 2026-10-10 at 9 39 24 AM" src="https://github.com/user-attachments/assets/09730e4c-4299-4b8f-9a8e-af60d9c0470a" />
+<img width="1319" height="730" alt="custom move" src="https://github.com/user-attachments/assets/5d336a8d-5630-4b4e-9df9-1be9166ea70b" />
+<img width="1109" height="622" alt="Screenshot 2026-10-10 at 9 47 04 AM" src="https://github.com/user-attachments/assets/946f2238-10fe-45c4-b8dd-59401d7b975a" />
+
+
+https://github.com/user-attachments/assets/392460ca-f257-4e78-99aa-cbb683b954ec
+
+
+
 
 ## Setup
 
