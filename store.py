@@ -28,6 +28,9 @@ class Avatar:
     name: str = "My avatar"
     #: Animations that came inside the avatar's GLB, as contract clips.
     clips: list[Clip] = field(default_factory=list)
+    #: clip id -> index of the GLB animation it came from. Export keeps only
+    #: these, so a model move deleted on Play is left out of the download.
+    model_animations: dict[str, int] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         glb_url = f"/api/avatars/{self.id}/glb" if self.rig.format == "glb" else None
@@ -116,6 +119,18 @@ class Store:
                               best_reward=best_reward, source=source)
         with self._lock:
             self.behaviours[behaviour.id] = behaviour
+        return behaviour
+
+    def remove_behaviour(self, behaviour_id: str) -> Behaviour | None:
+        """Delete a behaviour. A model move also leaves its avatar's moves."""
+        with self._lock:
+            behaviour = self.behaviours.pop(behaviour_id, None)
+            if behaviour and behaviour.source == "model":
+                avatar = self.avatars.get(behaviour.avatar_id)
+                if avatar:
+                    avatar.clips = [c for c in avatar.clips
+                                    if c.id != behaviour.clip.id]
+                    avatar.model_animations.pop(behaviour.clip.id, None)
         return behaviour
 
     def list_behaviours(self, avatar_id: str | None = None) -> list[Behaviour]:

@@ -321,6 +321,11 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
 .behaviour.active { background: var(--sun); }
 .behaviour small { color: var(--muted); font-size: .76rem; font-weight: 600; }
 .behaviour.active small { color: var(--ink); }
+.behaviour-card { position: relative; display: grid; }
+.behaviour-delete {
+  position: absolute; top: .35rem; right: .35rem;
+  padding: .05rem .45rem; line-height: 1.2;
+}
 
 .stub-note {
   margin-top: 1.3rem; padding: .9rem 1.1rem; border-radius: 14px;
@@ -581,3 +586,32 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
   border: var(--edge); border-radius: 12px; padding: .35rem .6rem; background: #fff;
 }
 .caught-list small { display: block; color: var(--muted); font-weight: 600; }
+
+/* -- training rounds (Train) --------------------------------------------- */
+.rounds { margin-top: 1rem; }
+.round-bars {
+  /* Top padding leaves room for the gain labels above each bar. */
+  list-style: none; margin: .6rem 0 0; padding: 1.4rem 0 .2rem;
+  display: flex; align-items: flex-end; gap: .5rem; overflow-x: auto;
+}
+.round-bars li { display: grid; justify-items: center; gap: .2rem; min-width: 3.4rem; }
+.round-bars li.fresh:not(:first-child) {
+  margin-left: .6rem; padding-left: 1rem; border-left: 2px dashed var(--muted);
+}
+.round-bars small { color: var(--muted); font-weight: 700; white-space: nowrap; }
+.round-bar {
+  position: relative; display: flex; align-items: flex-end; justify-content: center;
+  width: 3rem; height: 7rem; padding: 0; border: var(--edge); border-radius: 10px;
+  background: #fff; cursor: pointer; overflow: visible;
+}
+.round-bar:disabled { cursor: default; opacity: .7; }
+.round-fill {
+  display: flex; align-items: flex-start; justify-content: center;
+  width: 100%; border-radius: 0 0 8px 8px; background: var(--mint);
+  font-size: .75rem; font-weight: 800; padding-top: .15rem;
+}
+.round-bars li.picked .round-bar { outline: 3px solid var(--brand); outline-offset: 2px; }
+.round-gain {
+  position: absolute; top: -1.2rem; font-size: .72rem; font-weight: 800; color: var(--good);
+}
+.round-gain.down { color: var(--bad); }

@@ -114,9 +114,11 @@ export const api = {
   createClip: (clip) => request("/api/clips", json(clip)),
 
   // -- phases 3 & 4 ---------------------------------------------------
-  startRun: (avatarId, targetClipId, config, speed = 1) =>
+  // continueFrom: an earlier run's id, to carry on from the pose it ended on.
+  startRun: (avatarId, targetClipId, config, speed = 1, continueFrom = null) =>
     request("/api/training/runs",
-      json({ avatar_id: avatarId, target_clip_id: targetClipId, config, speed })),
+      json({ avatar_id: avatarId, target_clip_id: targetClipId, config, speed,
+             continue_from: continueFrom })),
 
   // A plain link, not a fetch: the server names the file and the browser
   // saves it.
@@ -163,4 +165,8 @@ export const api = {
     request(`/api/behaviours?avatar_id=${encodeURIComponent(avatarId)}`),
 
   saveBehaviour: (body) => request("/api/behaviours", json(body)),
+
+  // Returns { avatar } so a deleted model move can leave the avatar's moves.
+  deleteBehaviour: (id) =>
+    request(`/api/behaviours/${id}`, { method: "DELETE" }),
 };

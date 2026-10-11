@@ -27,29 +27,83 @@ export const StepTrain = {
     const previewing = ref(false);
     const running = computed(() =>
       status.value === "running" || status.value === "paused");
+    // The round picked in "Your rounds": what is shown, saved, downloaded,
+    // and kept training from.
+    const selectedRunId = ref(null);
     let closeStream = null;
+
+    const attempts = computed(() =>
+      state.attempts.filter((a) => a.clipId === state.activeClip?.id));
+    const selected = computed(() =>
+      attempts.value.find((a) => a.runId === selectedRunId.value) || null);
+    const bestAttempt = computed(() =>
+      attempts.value.reduce((best, a) =>
+        (!best || a.last.match > best.last.match ? a : best), null));
+
+    // Coming back to this step: pick up the latest round of this move.
+    selectedRunId.value = attempts.value.at(-1)?.runId ?? null;
+
+    // While training, the live episode; afterwards, the picked round's last.
+    const shown = computed(() =>
+      running.value || !selected.value ? latest.value : selected.value.last);
+
+    /** How much a round improved on the one it carried on from, in points. */
+    function gain(attempt) {
+      const parent = state.attempts.find((a) => a.runId === attempt.continuedFrom);
+      return parent
+        ? Math.round((attempt.last.match - parent.last.match) * 100) : null;
+    }
+
+    function recordAttempt() {
+      if (!run.value || !latest.value) return;
+      if (state.attempts.some((a) => a.runId === run.value.id)) return;
+      state.attempts.push({
+        runId: run.value.id,
+        clipId: run.value.target_clip_id,
+        round: run.value.round,
+        continuedFrom: run.value.continued_from,
+        last: latest.value,
+      });
+      selectedRunId.value = run.value.id;
+    }
+
+    function selectAttempt(attempt) {
+      if (running.value) return;
+      selectedRunId.value = attempt.runId;
+      previewing.value = false;
+      saved.value = false;
+    }
+
+    function removeAttempt(attempt) {
+      state.attempts = state.attempts.filter((a) => a.runId !== attempt.runId);
+      if (selectedRunId.value === attempt.runId) {
+        selectedRunId.value = attempts.value.at(-1)?.runId ?? null;
+      }
+    }
 
     const targetPose = computed(() =>
       state.activeClip
         ? characteristicPose(state.activeClip, state.schema.rest_pose)
         : state.schema.rest_pose);
 
-    const learnerPose = computed(() => latest.value?.pose || state.schema.rest_pose);
-    const jointHeat = computed(() => latest.value?.per_joint_error || null);
+    const learnerPose = computed(() => shown.value?.pose || state.schema.rest_pose);
+    const jointHeat = computed(() => shown.value?.per_joint_error || null);
     const matchPercent = computed(() =>
-      Math.round((latest.value?.match ?? 0) * 100));
+      Math.round((shown.value?.match ?? 0) * 100));
 
     // Only a GLB rig has a model to export; a stick figure would just 409.
     const glbUrl = computed(() =>
-      run.value && state.avatar.rig.format === "glb"
-        ? api.exportGlbUrl(run.value.id) : null);
+      selected.value && state.avatar.rig.format === "glb"
+        ? api.exportGlbUrl(selected.value.runId) : null);
 
     // With every slider at zero there is nothing to earn, so the learner gets
     // no signal at all. Worth saying out loud — otherwise it just looks broken.
     const noReward = computed(() =>
       Object.values(weights.value).every((w) => w <= 0));
 
-    async function start() {
+    // keepGoing: carry on from the picked round instead of the T-pose.
+    async function start(keepGoing = false) {
+      const from = keepGoing ? selected.value?.runId : null;
       stopStream();
       history.value = [];
       latest.value = null;
@@ -61,7 +115,7 @@ export const StepTrain = {
         run.value = await api.startRun(
           state.avatar.id, state.activeClip.id,
           { episodes: episodesTotal.value, reward_weights: weights.value },
-          speed.value);
+          speed.value, from);
 
         closeStream = api.streamRun(run.value.id, {
           onEpisode(episode) {
@@ -75,6 +129,7 @@ export const StepTrain = {
           },
           onEnd() {
             status.value = "finished";
+            recordAttempt();
           },
           onError(err) {
             error.value = err.message;
@@ -107,14 +162,6 @@ export const StepTrain = {
       }
     }
 
-    function reset() {
-      stopStream();
-      history.value = [];
-      latest.value = null;
-      run.value = null;
-      status.value = "idle";
-    }
-
     function stopStream() {
       closeStream?.();
       closeStream = null;
@@ -123,10 +170,10 @@ export const StepTrain = {
     // -- pose sequence: catch poses from the learner, save them as a move --
 
     function catchPose() {
-      if (!latest.value) return;
+      if (!shown.value) return;
       state.caughtPoses.push({
-        pose: latest.value.pose,
-        reward: latest.value.reward,
+        pose: shown.value.pose,
+        reward: shown.value.reward,
         from: state.activeClip?.name || "",
       });
       sequenceSaved.value = false;
@@ -180,11 +227,11 @@ export const StepTrain = {
         avatar_id: state.avatar.id,
         name: `${state.activeClip.name} (learned)`,
         trained: true,
-        best_reward: latest.value.best_reward,
+        best_reward: selected.value.last.best_reward,
         clip: {
           name: `${state.activeClip.name} (learned)`,
           fps: 24,
-          keyframes: [{ t: 0, pose: latest.value.pose }],
+          keyframes: [{ t: 0, pose: selected.value.last.pose }],
         },
       });
       await refreshBehaviours();
@@ -203,7 +250,8 @@ export const StepTrain = {
       catchPose, moveCaught, removeCaught, saveSequence,
       trainable, state, weights, episodesTotal, speed, history, latest, status, error, run,
       targetPose, learnerPose, jointHeat, matchPercent, noReward, saved, glbUrl,
-      start, stop, togglePause, reset, changeSpeed, saveLearned,
+      start, stop, togglePause, changeSpeed, saveLearned,
+      attempts, selected, bestAttempt, shown, gain, selectAttempt, removeAttempt,
       labels: state.schema.reward_labels,
       running,
     };
@@ -235,13 +283,14 @@ export const StepTrain = {
               <small>match</small>
             </div>
             <dl>
-              <div><dt>Try</dt><dd>{{ latest?.episode ?? 0 }} / {{ episodesTotal }}</dd></div>
-              <div><dt>Score</dt><dd>{{ (latest?.reward ?? 0).toFixed(2) }}</dd></div>
-              <div><dt>Best</dt><dd>{{ (latest?.best_reward ?? 0).toFixed(2) }}</dd></div>
+              <div v-if="running ? run : selected"><dt>Round</dt><dd>{{ running ? run.round : selected?.round }}</dd></div>
+              <div><dt>Try</dt><dd>{{ shown?.episode ?? 0 }} / {{ episodesTotal }}</dd></div>
+              <div><dt>Score</dt><dd>{{ (shown?.reward ?? 0).toFixed(2) }}</dd></div>
+              <div><dt>Best</dt><dd>{{ (shown?.best_reward ?? 0).toFixed(2) }}</dd></div>
               <div><dt>Trying new things</dt>
-                   <dd>{{ Math.round((latest?.exploration ?? 0) * 100) }}%</dd></div>
+                   <dd>{{ Math.round((shown?.exploration ?? 0) * 100) }}%</dd></div>
             </dl>
-            <p v-if="latest?.note" class="note">{{ latest.note }}</p>
+            <p v-if="shown?.note" class="note">{{ shown.note }}</p>
           </div>
           <AvatarCanvas :rig="state.avatar.rig" :pose="learnerPose"
                         :clip="previewClip"
@@ -252,6 +301,39 @@ export const StepTrain = {
           <i class="dot green"></i> joint is on target
           <i class="dot red"></i> joint is still wrong
         </p>
+
+        <div v-if="attempts.length" class="panel rounds">
+          <h3>Your rounds</h3>
+          <p class="muted">Each bar is one round of training. "Keep training"
+             starts the next round from the pose you picked, so practice adds
+             up. Tap a bar to pick the round to keep.</p>
+          <ol class="round-bars">
+            <li v-for="a in attempts" :key="a.runId"
+                :class="{ fresh: !a.continuedFrom, picked: a === selected }">
+              <button class="round-bar" :disabled="running"
+                      :aria-label="'Round ' + a.round + ', ' + Math.round(a.last.match * 100) + '% match'"
+                      @click="selectAttempt(a)">
+                <span class="round-gain" v-if="gain(a) !== null"
+                      :class="{ down: gain(a) < 0 }">
+                  {{ gain(a) >= 0 ? '+' : '' }}{{ gain(a) }}
+                </span>
+                <span class="round-fill"
+                      :style="{ height: Math.max(4, Math.round(a.last.match * 100)) + '%' }">
+                  {{ Math.round(a.last.match * 100) }}%
+                </span>
+              </button>
+              <small>{{ a === bestAttempt ? '★ ' : '' }}Round {{ a.round }}</small>
+              <button class="ghost small" :disabled="running"
+                      :aria-label="'Remove round ' + a.round"
+                      @click="removeAttempt(a)">×</button>
+            </li>
+          </ol>
+          <p class="muted" v-if="bestAttempt && selected && selected !== bestAttempt">
+            ★ Round {{ bestAttempt.round }} matched best
+            ({{ Math.round(bestAttempt.last.match * 100) }}%).
+            <button class="ghost small" @click="selectAttempt(bestAttempt)">Pick it</button>
+          </p>
+        </div>
 
         <div class="split">
           <div class="panel">
@@ -283,24 +365,25 @@ export const StepTrain = {
             </div>
 
             <div class="row">
-              <button class="primary" v-if="!running" @click="start">
-                {{ status === 'finished' ? 'Train again' : 'Start training' }}
+              <button class="primary" v-if="!running && selected" @click="start(true)">
+                Keep training round {{ selected.round }}
+              </button>
+              <button :class="selected ? 'ghost' : 'primary'" v-if="!running"
+                      @click="start(false)">
+                {{ selected ? 'Start over' : 'Start training' }}
               </button>
               <button class="ghost" v-if="running" @click="togglePause">
                 {{ status === 'paused' ? 'Resume' : 'Pause' }}
               </button>
               <button class="ghost" v-if="running" @click="stop">Stop</button>
-              <button class="ghost" v-if="status === 'finished'" @click="reset">
-                Clear
-              </button>
-              <button class="ghost" v-if="latest" @click="catchPose">
+              <button class="ghost" v-if="shown" @click="catchPose">
                 Catch this pose
               </button>
-              <button class="primary" v-if="status === 'finished' && latest"
+              <button class="primary" v-if="!running && selected"
                       @click="saveLearned" :disabled="saved">
-                {{ saved ? 'Saved!' : 'Save what it learned' }}
+                {{ saved ? 'Saved!' : 'Save round ' + selected.round }}
               </button>
-              <a class="button ghost" v-if="status === 'finished' && latest && glbUrl"
+              <a class="button ghost" v-if="!running && glbUrl"
                  :href="glbUrl" download>
                 Download animated GLB
               </a>

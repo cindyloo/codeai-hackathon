@@ -153,6 +153,7 @@ def _add_avatar(rig: Rig, **kwargs):
         return avatar
 
     for raw in found:
+        index = raw.pop("index")
         raw["name"] = raw["name"][:1].upper() + raw["name"][1:]
         try:
             clip = store.add_clip(validate_clip(raw))
@@ -160,6 +161,7 @@ def _add_avatar(rig: Rig, **kwargs):
             log(f"[avatar] {avatar.id}: skipped animation {raw['name']!r}: {exc}")
             continue
         avatar.clips.append(clip)
+        avatar.model_animations[clip.id] = index
         store.add_behaviour(name=clip.name, clip=clip, avatar_id=avatar.id,
                             source="model")
     if avatar.clips:
@@ -457,7 +459,20 @@ def create_run():
         return fail("Pick a move to train towards first.", 404)
 
     cfg = TrainConfig.from_json(body.get("config"))
-    run = TrainingRun(avatar.id, target, cfg)
+
+    # "Keep training": start from the pose an earlier round ended on, so
+    # practice adds up instead of starting from the T-pose every time.
+    previous = None
+    if body.get("continue_from"):
+        previous = store.get_run(body["continue_from"])
+        if not previous or previous.avatar_id != avatar.id:
+            return fail("That earlier round doesn't exist.", 404)
+        try:
+            cfg.start_pose = export.final_pose(previous)
+        except export.ExportError as exc:
+            return fail(exc.user_message, exc.status)
+
+    run = TrainingRun(avatar.id, target, cfg, continued_from=previous)
     store.add_run(run)
     run.set_speed(body.get("speed", 1.0))
     run.start(providers.get_trainer(), avatar.rig)
@@ -578,6 +593,17 @@ def list_behaviours():
     avatar_id = request.args.get("avatar_id")
     return jsonify({"behaviours": [b.to_json()
                                    for b in store.list_behaviours(avatar_id)]})
+
+
+@app.delete("/api/behaviours/<behaviour_id>")
+def delete_behaviour(behaviour_id: str):
+    """Remove a behaviour. Deleting one of the model's own moves also drops
+    that animation from the avatar's exported GLB."""
+    behaviour = store.remove_behaviour(behaviour_id)
+    if not behaviour:
+        return fail("That behaviour doesn't exist.", 404)
+    avatar = store.get_avatar(behaviour.avatar_id)
+    return jsonify({"avatar": avatar.to_json() if avatar else None})
 
 
 @app.post("/api/behaviours")

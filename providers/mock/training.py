@@ -79,13 +79,15 @@ class MockTrainer(Trainer):
         rng = random.Random(cfg.seed or None)
         goal = characteristic_pose(target)
 
-        current = dict(REST_POSE)
-        current_reward, _ = reward(current, goal, cfg.reward_weights)
+        # A later round carries on from where an earlier one ended.
+        current = {**REST_POSE, **(cfg.start_pose or {})}
+        current_reward, _ = reward(current, goal, cfg.reward_weights,
+                                   previous=current)
         best_reward = current_reward
-        previous = None
 
-        # How far the starting pose is from the goal, so `match` can express
-        # progress as "0% = where I started, 100% = the target".
+        # How far the T-pose is from the goal, so `match` can express progress
+        # as "0% = the T-pose, 100% = the target". Measured from the T-pose even
+        # when continuing, so every round is on the same scale.
         baseline = max(pose_distance(REST_POSE, goal), 1e-6)
 
         def match_of(pose) -> float:
@@ -124,14 +126,17 @@ class MockTrainer(Trainer):
                                           blend))
                     for bone in current
                 }
+                # Scored as staying put, the same way the next candidate's
+                # step will be judged against it. Scoring it against the pose
+                # before (or, at the start, against nothing) mixed two
+                # different questions and could freeze "Move smoothly".
                 current_reward, breakdown = reward(
-                    current, goal, cfg.reward_weights, previous=previous)
+                    current, goal, cfg.reward_weights, previous=current)
                 if current_reward > best_reward:
                     best_reward = current_reward
                     if episode > 1:
                         note = "New best!"
 
-            previous = current
             yield Episode(
                 episode=episode,
                 # The score of what it TRIED this episode, not the score it kept.

@@ -246,6 +246,11 @@ class TrainConfig:
     seed: int = 0
     reward_weights: dict[str, float] = field(
         default_factory=lambda: dict(DEFAULT_REWARD_WEIGHTS))
+    #: Where to start instead of the T-pose: the pose an earlier round ended
+    #: on, so "Keep training" carries on rather than starting over. None means
+    #: the rest pose. Trainers should still measure ``match`` from the rest
+    #: pose, so rounds are comparable and the number keeps climbing.
+    start_pose: dict[str, list[float]] | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, Any] | None) -> "TrainConfig":
@@ -260,6 +265,8 @@ class TrainConfig:
             exploration=_clamp(float(data.get("exploration", 0.8)), 0.0, 1.0),
             seed=int(data.get("seed", 0)),
             reward_weights=weights,
+            start_pose=(validate_pose(data["start_pose"], where="start_pose")
+                        if data.get("start_pose") else None),
         )
 
     def to_json(self) -> dict[str, Any]:

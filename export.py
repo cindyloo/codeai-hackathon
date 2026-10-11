@@ -137,6 +137,13 @@ def build_glb(run, avatar, clip) -> tuple[bytes, dict[str, Any]]:
 
     payload = build_document(run, avatar, clip)
 
+    # Keep only the GLB's own animations the avatar still has as moves: one
+    # deleted on Play (an old "(learned)" bake, say) stays out of this file.
+    animations = document.get("animations") or []
+    keep = set(avatar.model_animations.values())
+    document["animations"] = [a for i, a in enumerate(animations) if i in keep]
+    payload["kept_animations"] = [a.get("name", "") for a in document["animations"]]
+
     # Named as "Save what it learned" names it, so loading the file back
     # doesn't give two moves called "Walk" when the rig brought its own.
     name = f"{clip.name} (learned)"

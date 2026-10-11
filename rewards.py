@@ -203,11 +203,21 @@ def _term_symmetry(current, target, previous) -> float:
     return total / len(pairs)
 
 
+#: A step up to this pose_distance counts as smooth and costs nothing.
+SMOOTH_STEP = 0.05
+
+
 def _term_stillness(current, target, previous) -> float:
-    """Points for not thrashing. Rewards smooth movement between steps."""
+    """Points for not thrashing. Rewards smooth movement between steps.
+
+    Small steps are free; only the part of a step beyond SMOOTH_STEP costs
+    points. Penalising every bit of movement made standing still always score
+    best, so with this slider up the learner never moved at all.
+    """
     if not previous:
         return 1.0
-    return _clamp01(1.0 - pose_distance(current, previous) * 4.0)
+    jump = max(0.0, pose_distance(current, previous) - SMOOTH_STEP)
+    return _clamp01(1.0 - jump * 4.0)
 
 
 TERMS = {

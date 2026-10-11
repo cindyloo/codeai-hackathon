@@ -9,6 +9,7 @@
 import { onMounted } from "vue";
 import {
   PLAYBACK_SPEEDS,
+  deleteBehaviour,
   goTo,
   refreshBehaviours,
   setActiveBehaviour,
@@ -25,6 +26,7 @@ export const StepPlayground = {
       PLAYBACK_SPEEDS,
       state,
       play: setActiveBehaviour,
+      remove: deleteBehaviour,
       render: () => goTo("render"),
     };
   },
@@ -43,15 +45,22 @@ export const StepPlayground = {
             save what it learned.
           </p>
           <div class="behaviour-grid">
-            <button v-for="b in state.behaviours" :key="b.id"
-                    class="behaviour"
-                    :class="{ active: state.activeBehaviour?.id === b.id }"
-                    @click="play(b)">
-              <strong>{{ b.name }}</strong>
-              <small v-if="b.trained">learned · best {{ b.best_reward.toFixed(2) }}</small>
-              <small v-else-if="b.source === 'model'">from your model</small>
-              <small v-else>imagined</small>
-            </button>
+            <div v-for="b in state.behaviours" :key="b.id" class="behaviour-card">
+              <button class="behaviour"
+                      :class="{ active: state.activeBehaviour?.id === b.id }"
+                      @click="play(b)">
+                <strong>{{ b.name }}</strong>
+                <small v-if="b.trained">learned · best {{ b.best_reward.toFixed(2) }}</small>
+                <small v-else-if="b.source === 'model'">from your model</small>
+                <small v-else>imagined</small>
+              </button>
+              <button class="ghost small behaviour-delete"
+                      :aria-label="'Delete ' + b.name"
+                      :title="b.source === 'model'
+                        ? 'Delete — and leave it out of your downloaded model'
+                        : 'Delete'"
+                      @click="remove(b)">×</button>
+            </div>
           </div>
           <div class="row" v-if="state.activeBehaviour">
             <button class="primary" @click="render">Make a video</button>

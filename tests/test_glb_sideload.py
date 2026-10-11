@@ -239,6 +239,57 @@ def test_sideload_without_animations_has_no_moves(client):
     assert response.get_json()["clips"] == []
 
 
+def two_move_fixture():
+    document, binary = gltf.read_glb(FIXTURE.read_bytes())
+    bones = gltf.resolve_bones(document)
+    up = {"L_shoulder": list(quat_from_euler(0, 0, -90))}
+    kick = {"L_hip": list(quat_from_euler(-40, 0, 0))}
+    for name, pose in (("kick", kick), ("wave", up)):   # each goes first
+        binary = gltf.add_pose_animation(
+            document, binary, [(0.0, {}), (1.0, pose), (2.0, {})], bones, name=name)
+    return gltf.write_glb(document, binary)
+
+
+def exported_animation_names(avatar_id):
+    import threading
+
+    import export
+    from schemas import TrainConfig
+    from training import TrainingRun
+
+    avatar = store.get_avatar(avatar_id)
+    clip = store.add_clip(providers.get_poser().pose(
+        "waves arms in the air", avatar.rig, lambda *_: None))
+    run = TrainingRun(avatar.id, clip, TrainConfig(episodes=20, seed=1))
+    for episode in providers.get_trainer().train(
+            avatar.rig, clip, run.cfg, threading.Event()):
+        run._history.append(episode)
+    data, _ = export.build_glb(run, avatar, clip)
+    return [a["name"] for a in gltf.read_glb(data)[0]["animations"]]
+
+
+def test_deleting_a_model_move_leaves_it_out_of_the_export(client):
+    avatar = post_glb(client, two_move_fixture()).get_json()
+    behaviours = client.get(f"/api/behaviours?avatar_id={avatar['id']}").get_json()
+    wave = next(b for b in behaviours["behaviours"] if b["name"] == "Wave")
+
+    response = client.delete(f"/api/behaviours/{wave['id']}")
+
+    assert response.status_code == 200
+    assert [c["name"] for c in response.get_json()["avatar"]["clips"]] == ["Kick"]
+    assert exported_animation_names(avatar["id"]) == ["Arms in the air (learned)", "kick"]
+
+
+def test_without_deletions_the_export_keeps_every_model_move(client):
+    avatar = post_glb(client, two_move_fixture()).get_json()
+    assert exported_animation_names(avatar["id"]) == [
+        "Arms in the air (learned)", "wave", "kick"]
+
+
+def test_deleting_a_missing_behaviour_is_a_404(client):
+    assert client.delete("/api/behaviours/bhv_nope").status_code == 404
+
+
 def test_sideload_works_when_the_server_terminates_the_input_stream(client):
     # gunicorn (production) sets wsgi.input_terminated, which makes Werkzeug
     # treat max_content_length as a hard cap on the stream; a cap equal to the

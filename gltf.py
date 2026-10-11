@@ -590,6 +590,7 @@ def read_clips(document: dict[str, Any], binary: bytes,
             continue   # drives nothing we can show (e.g. only fingers)
 
         clips.append({
+            "index": number,   # which of the file's animations this came from
             "name": (animation.get("name") or f"Move {number + 1}").strip(),
             "fps": IMPORT_FPS,
             "loop": True,

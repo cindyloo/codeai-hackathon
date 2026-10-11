@@ -35,6 +35,10 @@ export const state = reactive({
   // Poses caught from the learner on the Train step, in sequence order.
   // Kept across runs so one sequence can mix poses from different rewards.
   caughtPoses: [],    // { pose, reward, from }
+  // Finished training rounds, so a child can compare them, pick the best and
+  // keep training from it. { runId, clipId, round, continuedFrom, last }
+  // where `last` is the round's final episode.
+  attempts: [],
   error: null,
   // status: idle | running | done | error. Kept here rather than in
   // StepSketch so the download button survives navigating on to "Teach" —
@@ -93,6 +97,7 @@ export function setAvatar(avatar) {
   state.behaviours = [];
   state.activeBehaviour = null;
   state.caughtPoses = [];
+  state.attempts = [];
   tposeGeneration++;
   state.tpose = { status: "idle", progress: 0, message: "", dataUrl: null, error: null };
 }
@@ -133,6 +138,23 @@ export async function refreshBehaviours() {
   state.activeBehaviour = behaviours.find((item) => item.id === selectedId)
     || behaviours[0]
     || null;
+}
+
+/**
+ * Delete a behaviour. A model move also leaves the avatar's moves and the
+ * Teach list, and is left out of the next GLB export.
+ */
+export async function deleteBehaviour(behaviour) {
+  const { avatar } = await api.deleteBehaviour(behaviour.id);
+  if (avatar && state.avatar?.id === avatar.id) {
+    state.avatar.clips = avatar.clips;
+    if (behaviour.source === "model") {
+      state.clips = state.clips.filter((c) => c.id !== behaviour.clip.id);
+      if (state.activeClip?.id === behaviour.clip.id) state.activeClip = null;
+    }
+  }
+  if (state.activeBehaviour?.id === behaviour.id) state.activeBehaviour = null;
+  await refreshBehaviours();
 }
 
 export function setActiveBehaviour(behaviour) {

@@ -36,11 +36,16 @@ class TrainingRun:
     capped at 5000 by TrainConfig, so keeping them all is a few MB at worst.
     """
 
-    def __init__(self, avatar_id: str, target_clip: Clip, cfg: TrainConfig):
+    def __init__(self, avatar_id: str, target_clip: Clip, cfg: TrainConfig,
+                 continued_from: "TrainingRun | None" = None):
         self.id = new_id("run")
         self.avatar_id = avatar_id
         self.target_clip = target_clip
         self.cfg = cfg
+        # Rounds of practice: 1 for a fresh start, one more each time a child
+        # keeps training from an earlier round.
+        self.continued_from = continued_from.id if continued_from else None
+        self.round = continued_from.round + 1 if continued_from else 1
 
         self.status = "pending"   # pending | running | paused | done | stopped | error
         self.error: str | None = None
@@ -173,4 +178,6 @@ class TrainingRun:
             "best_reward": self.best_reward,
             "config": self.cfg.to_json(),
             "target_clip_id": self.target_clip.id,
+            "continued_from": self.continued_from,
+            "round": self.round,
         }
