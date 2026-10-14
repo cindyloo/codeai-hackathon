@@ -108,15 +108,10 @@ def build_document(run, avatar, clip) -> dict[str, Any]:
     }
 
 
-def build_glb(run, avatar, clip) -> tuple[bytes, dict[str, Any]]:
-    """The avatar's GLB with the learned move baked in as an animation.
-
-    Returns (bytes, document). The animation moves from the START pose (the
-    file's bind T-pose) to the END pose and back. The node rotations stay at
-    bind: anything that reads a rig — this app included, when the file is
-    loaded back — takes them as the rest pose, so baking the end pose into
-    them would offset every later move by it.
-    """
+def _open_avatar_glb(avatar):
+    """(document, binary, bones) for the avatar's GLB, with only the model
+    animations it still has as moves: one deleted on Play (an old
+    "(learned)" bake, say) stays out of every export."""
     if avatar.rig.format != "glb" or not avatar.rig.glb_bytes:
         raise ExportError(
             "This avatar is drawn as a stick figure, so there's no model to "
@@ -135,13 +130,79 @@ def build_glb(run, avatar, clip) -> tuple[bytes, dict[str, Any]]:
             "That avatar's model has no bones I recognise, so it can't be posed.",
             409, "no contract bones resolved in the GLB")
 
-    payload = build_document(run, avatar, clip)
-
-    # Keep only the GLB's own animations the avatar still has as moves: one
-    # deleted on Play (an old "(learned)" bake, say) stays out of this file.
     animations = document.get("animations") or []
     keep = set(avatar.model_animations.values())
     document["animations"] = [a for i, a in enumerate(animations) if i in keep]
+    return document, binary, bones
+
+
+def clip_keyframes(clip) -> list[tuple[float, dict[str, list[float]]]]:
+    """A clip as animation keyframes, every bone filled in.
+
+    A single pose (what training saves) becomes T-pose -> pose -> hold ->
+    T-pose on ANIMATION_TIMING, as the browser plays it (performableClip in
+    pose.js); a clip of several poses keeps its own timing.
+    """
+    def full(pose):
+        return {**REST_POSE, **pose}
+
+    if len(clip.keyframes) == 1:
+        poses = {"start": REST_POSE, "end": full(clip.keyframes[0].pose)}
+        return [(t, poses[which]) for which, t in ANIMATION_TIMING]
+    return [(k.t, full(k.pose)) for k in clip.keyframes]
+
+
+def build_avatar_glb(avatar, behaviours) -> tuple[bytes, dict[str, Any]]:
+    """The avatar's GLB with every move it has, for the Render step.
+
+    Each taught behaviour (learned, a caught sequence, hand-built, imagined)
+    is baked in as an animation, in the order given; the model's own
+    animations the avatar still has follow. Returns (bytes, summary).
+    """
+    document, binary, bones = _open_avatar_glb(avatar)
+    kept = document["animations"]
+    document["animations"] = []
+
+    taken = {a.get("name", "") for a in kept}
+    baked = []
+    for behaviour in behaviours:
+        if behaviour.source == "model" or not behaviour.clip.keyframes:
+            continue
+        # Unique names, so a player's animation menu can tell them apart.
+        name, n = behaviour.name, 2
+        while name in taken:
+            name, n = f"{behaviour.name} ({n})", n + 1
+        taken.add(name)
+        baked.append((name, behaviour.clip))
+
+    # Each new animation goes first, so bake last to first.
+    for name, clip in reversed(baked):
+        binary = gltf.add_pose_animation(
+            document, binary, clip_keyframes(clip), bones, name=name)
+
+    document["animations"] += kept
+    summary = {
+        "schema_version": SCHEMA_VERSION,
+        "avatar_id": avatar.id,
+        "baked_animations": [name for name, _clip in baked],
+        "kept_animations": [a.get("name", "") for a in kept],
+        "posed": "start",
+    }
+    gltf.attach_extras(document, summary)
+    return gltf.write_glb(document, binary), summary
+
+
+def build_glb(run, avatar, clip) -> tuple[bytes, dict[str, Any]]:
+    """The avatar's GLB with the learned move baked in as an animation.
+
+    Returns (bytes, document). The animation moves from the START pose (the
+    file's bind T-pose) to the END pose and back. The node rotations stay at
+    bind: anything that reads a rig — this app included, when the file is
+    loaded back — takes them as the rest pose, so baking the end pose into
+    them would offset every later move by it.
+    """
+    document, binary, bones = _open_avatar_glb(avatar)
+    payload = build_document(run, avatar, clip)
     payload["kept_animations"] = [a.get("name", "") for a in document["animations"]]
 
     # Named as "Save what it learned" names it, so loading the file back

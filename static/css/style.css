@@ -413,6 +413,7 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
   gap: 1rem; padding: .8rem 0;
 }
 .render-bar > div { display: grid; }
+.render-bar > .row { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0; }
 .render-bar span { color: var(--muted); font-size: .8rem; font-weight: 600; }
 .render-result {
   width: min(820px, calc(100% - 2rem)); border: var(--edge);
@@ -446,7 +447,7 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
   .step-tab .label, .step-tab .hint { min-width: 0; overflow-wrap: anywhere; }
   .render-controls { grid-template-columns: 1fr; }
   .render-bar { align-items: stretch; flex-direction: column; }
-  .render-bar button { width: 100%; }
+  .render-bar button, .render-bar .button { width: 100%; text-align: center; }
   .render-result { padding: .8rem; }
 }
 

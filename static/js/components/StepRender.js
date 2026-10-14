@@ -6,6 +6,7 @@ import {
   ref,
 } from "vue";
 
+import { api } from "../api.js";
 import { recordCanvas } from "../recorder.js";
 import {
   PLAYBACK_SPEEDS,
@@ -137,6 +138,11 @@ export const StepRender = {
       }
     }
 
+    // Only a GLB rig has a model to download; a stick figure would just 409.
+    const glbUrl = computed(() =>
+      state.avatar?.rig?.format === "glb"
+        ? api.exportAvatarGlbUrl(state.avatar.id) : null);
+
     function closeResult() {
       resultDialog.value?.close();
     }
@@ -152,6 +158,7 @@ export const StepRender = {
       canvas,
       closeResult,
       error,
+      glbUrl,
       makeVideo,
       paused,
       percent,
@@ -259,11 +266,17 @@ export const StepRender = {
               <strong>5 second video</strong>
               <span>{{ VIDEO_WIDTH }} × {{ VIDEO_HEIGHT }} WebM</span>
             </div>
-            <button class="primary"
-                    :disabled="!ready || !selected || busy"
-                    @click="makeVideo">
-              {{ busy ? 'Recording…' : 'Make my video' }}
-            </button>
+            <div class="row">
+              <a v-if="glbUrl" class="button ghost" :href="glbUrl" download
+                 title="Your 3D model with every move on your list, for Blender, three.js or loading back in here">
+                Download 3D model
+              </a>
+              <button class="primary"
+                      :disabled="!ready || !selected || busy"
+                      @click="makeVideo">
+                {{ busy ? 'Recording…' : 'Make my video' }}
+              </button>
+            </div>
           </div>
           <p v-if="error" class="error">{{ error }}</p>
         </div>

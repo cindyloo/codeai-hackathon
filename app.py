@@ -526,6 +526,25 @@ def export_run_glb(run_id: str):
     })
 
 
+@app.get("/api/avatars/<avatar_id>/export.glb")
+def export_avatar_glb(avatar_id: str):
+    """The avatar with every move on its Play list baked in."""
+    avatar = store.get_avatar(avatar_id)
+    if not avatar:
+        return fail("That avatar doesn't exist.", 404)
+    try:
+        data, _ = export.build_avatar_glb(avatar,
+                                          store.list_behaviours(avatar.id))
+    except export.ExportError as exc:
+        if exc.detail:
+            log(f"[export] avatar {avatar_id}: {exc.detail}")
+        return fail(exc.user_message, exc.status)
+    return Response(data, mimetype="model/gltf-binary", headers={
+        "Content-Disposition": f'attachment; filename="my-avatar-{avatar_id}.glb"',
+        "Cache-Control": "no-cache",
+    })
+
+
 @app.get("/api/training/runs/<run_id>/export.json")
 def export_run_json(run_id: str):
     """Bones, start pose, end pose, provenance — the animation step's input."""

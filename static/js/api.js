@@ -123,6 +123,8 @@ export const api = {
   // A plain link, not a fetch: the server names the file and the browser
   // saves it.
   exportGlbUrl: (runId) => `/api/training/runs/${runId}/export.glb`,
+  // The avatar with every move on its Play list baked in.
+  exportAvatarGlbUrl: (avatarId) => `/api/avatars/${avatarId}/export.glb`,
 
   runControl: (runId, action, body = {}) =>
     request(`/api/training/runs/${runId}/${action}`, json(body)),

@@ -290,6 +290,55 @@ def test_deleting_a_missing_behaviour_is_a_404(client):
     assert client.delete("/api/behaviours/bhv_nope").status_code == 404
 
 
+# -- downloading the whole avatar (Render) -------------------------------------
+
+def save_behaviour(client, avatar_id, name, keyframes, trained=True):
+    response = client.post("/api/behaviours", json={
+        "avatar_id": avatar_id, "name": name, "trained": trained,
+        "clip": {"name": name, "fps": 24, "loop": True, "keyframes": keyframes},
+    })
+    assert response.status_code in (200, 201), response.get_json()
+    return response.get_json()
+
+
+def test_the_avatar_download_carries_every_move_on_the_play_list(client):
+    avatar = post_glb(client, two_move_fixture()).get_json()
+    up = {"R_shoulder": list(quat_from_euler(0, 0, 80))}
+    knee = {"L_knee": list(quat_from_euler(60, 0, 0))}
+    save_behaviour(client, avatar["id"], "Reach (learned)", [{"t": 0, "pose": up}])
+    save_behaviour(client, avatar["id"], "My dance", [
+        {"t": 0, "pose": up}, {"t": 0.8, "pose": knee}, {"t": 1.6, "pose": up}])
+    behaviours = client.get(f"/api/behaviours?avatar_id={avatar['id']}").get_json()
+    wave = next(b for b in behaviours["behaviours"] if b["name"] == "Wave")
+    client.delete(f"/api/behaviours/{wave['id']}")
+
+    response = client.get(f"/api/avatars/{avatar['id']}/export.glb")
+
+    assert response.status_code == 200
+    assert response.mimetype == "model/gltf-binary"
+    assert "attachment" in response.headers["Content-Disposition"]
+    document, binary = gltf.read_glb(response.data)
+    # Taught moves first, then the model's own; the deleted wave stays out.
+    assert [a["name"] for a in document["animations"]] == [
+        "Reach (learned)", "My dance", "kick"]
+
+    clips = {c["name"]: c for c in gltf.read_clips(document, binary)}
+    # A single learned pose plays T-pose -> pose -> hold -> T-pose, as on Play.
+    assert clips["Reach (learned)"]["keyframes"][-1]["t"] == pytest.approx(3.0)
+    # A sequence keeps its own timing.
+    assert clips["My dance"]["keyframes"][-1]["t"] == pytest.approx(1.6)
+
+
+def test_a_stick_figure_has_no_model_to_download(client):
+    avatar = app_module._add_avatar(Rig(format="procedural", skeleton=list(BONES)))
+    response = client.get(f"/api/avatars/{avatar.id}/export.glb")
+    assert response.status_code == 409
+
+
+def test_downloading_a_missing_avatar_is_a_404(client):
+    assert client.get("/api/avatars/av_nope/export.glb").status_code == 404
+
+
 def test_sideload_works_when_the_server_terminates_the_input_stream(client):
     # gunicorn (production) sets wsgi.input_terminated, which makes Werkzeug
     # treat max_content_length as a hard cap on the stream; a cap equal to the
