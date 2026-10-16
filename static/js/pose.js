@@ -145,3 +145,71 @@ export function poseDistance(current, target, bones) {
   }
   return 0.5 * (sum / names.length) + 0.5 * worst;
 }
+
+// -- combining moves ----------------------------------------------------
+
+/** Frames per second a combined move is sampled at, like an imported one. */
+export const COMBINE_FPS = 12;
+/** The contract's limits on a clip (schemas.MAX_KEYFRAMES, MAX_CLIP_DURATION). */
+const MAX_KEYFRAMES = 240;
+const MAX_SECONDS = 20;
+
+/** How long one pass of a clip lasts, as it plays (a single pose: 3s). */
+export function clipSeconds(clip) {
+  const played = performableClip(clip);
+  return played.duration || played.keyframes.at(-1)?.t || 0;
+}
+
+/** Does `clip` move any of `bones` (or, with `stretch`, squash at all)? */
+export function clipMoves(clip, { bones = [], stretch = false } = {}) {
+  return clip.keyframes.some((k) => (stretch
+    ? Boolean(k.stretch)
+    : bones.some((b) => k.pose[b] && quatAngle(k.pose[b], IDENTITY) > 0.02)));
+}
+
+/**
+ * Layer moves by body part into one move.
+ *
+ * `layers` is a list of { bones, clip, speed, stretch }: each layer's bones
+ * come from its own clip, played at its own speed and looped; bones in no
+ * layer stay at rest. A layer with `stretch` supplies the whole-body squash
+ * and stretch instead. The result lasts one pass of the longest layer, so
+ * shorter ones repeat inside it — a 0.5s flap over a 1s wag flaps twice —
+ * and every layer is looped, so the combined move loops too.
+ *
+ * Returns keyframes for a clip, sampled at COMBINE_FPS.
+ */
+export function combineClips(layers, restPose) {
+  const active = layers
+    .filter((l) => l.clip)
+    .map((l) => {
+      const speed = l.speed || 1;
+      const clip = { ...performableClip(l.clip), loop: true };
+      clip.duration = clipSeconds(l.clip);
+      return { ...l, speed, clip, seconds: clip.duration / speed };
+    })
+    .filter((l) => l.seconds > 0);
+  if (!active.length) return [];
+
+  const seconds = Math.min(Math.max(...active.map((l) => l.seconds)), MAX_SECONDS);
+  const count = Math.min(Math.round(seconds * COMBINE_FPS) + 1, MAX_KEYFRAMES);
+  const frames = [];
+  for (let i = 0; i < count; i += 1) {
+    const t = count > 1 ? (i * seconds) / (count - 1) : 0;
+    const pose = { ...restPose };
+    let stretch = 0;
+    for (const layer of active) {
+      const local = t * layer.speed;
+      if (layer.stretch) {
+        stretch = sampleStretch(layer.clip, local);
+        continue;
+      }
+      const sampled = samplePose(layer.clip, local);
+      for (const bone of layer.bones) pose[bone] = sampled[bone] || IDENTITY;
+    }
+    const frame = { t: Math.round(t * 1000) / 1000, pose };
+    if (Math.abs(stretch) > 1e-4) frame.stretch = Math.round(stretch * 1000) / 1000;
+    frames.push(frame);
+  }
+  return frames;
+}

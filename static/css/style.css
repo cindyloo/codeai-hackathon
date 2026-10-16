@@ -616,3 +616,17 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
   position: absolute; top: -1.2rem; font-size: .72rem; font-weight: 800; color: var(--good);
 }
 .round-gain.down { color: var(--bad); }
+
+/* -- move combiner (Teach) ---------------------------------------------- */
+.combine-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(9rem, auto);
+  gap: .6rem; align-items: center; margin: .3rem 0;
+}
+.combine-row select {
+  width: 100%; min-width: 0; padding: .4rem .5rem; border: var(--edge);
+  border-radius: 10px; background: var(--panel); color: var(--ink); font: inherit;
+}
+.move-combiner p.small { font-size: .78rem; margin: .2rem 0 0; }
+@media (max-width: 560px) {
+  .combine-row { grid-template-columns: 1fr; }
+}

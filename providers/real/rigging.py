@@ -8,6 +8,7 @@ contract, so browsers only ever request /api/avatars/<id>/glb from this app.
 from __future__ import annotations
 
 import json
+import logging
 import struct
 import time
 from collections.abc import Callable
@@ -21,6 +22,7 @@ from providers.base import Progress, Rigger
 from schemas import BONES, OPTIONAL_BONES, ProviderError, Rig
 
 _JSON_CHUNK = b"JSON"
+_log = logging.getLogger(__name__)
 _MAX_JSON_BYTES = 2 * 1024 * 1024
 _MAX_GLB_BYTES = 100 * 1024 * 1024
 _PENDING_STATUSES = {
@@ -131,6 +133,19 @@ _REMOTE_JOINT_ALIASES: dict[str, str] = {
     "joint_tail": "tail",
     "joint_tail_tip": "tail_tip",
 }
+
+
+def _glb_node_names(glb: bytes) -> list[str]:
+    """Node names from a GLB's JSON chunk; empty if it can't be read."""
+    try:
+        length, kind = struct.unpack_from("<I4s", glb, 12)
+        if kind != _JSON_CHUNK:
+            return []
+        document = json.loads(glb[20:20 + length].decode("utf-8"))
+        return [n.get("name", "") for n in document.get("nodes", [])
+                if isinstance(n, dict) and isinstance(n.get("name"), str)]
+    except (struct.error, ValueError, UnicodeDecodeError, AttributeError):
+        return []
 
 
 class GlbError(ValueError):
@@ -407,12 +422,45 @@ class RealRigger(Rigger):
             "GET", f"/results/{encoded_id}/{encoded_id}_rigged.glb",
             deadline, _MAX_GLB_BYTES, missing_statuses=(404, 500))
         if cached is not None:
+            cached = self._with_tail(encoded_id, cached, deadline, progress)
             progress(0.94, "Bringing your avatar home...")
             rig = self._make_rig(cached)
             progress(0.99, "Your avatar is ready!")
             return rig
 
         return None
+
+    def _with_tail(self, encoded_id: str, cached: bytes, deadline: float,
+                   progress: Progress) -> bytes:
+        """A cached fish or bird rigged before tails existed, re-rigged with one.
+
+        Asks for the stored joints with cached_only, which never runs the
+        vision model: seg_server adds a tail to a fish's or bird's stored
+        joints on that call and marks its rig stale. If the joints now have a
+        tail the cached rig lacks, /rig rebuilds it in Blender. Anything else,
+        or any failure here, keeps the cached rig — this is an upgrade, never
+        a reason not to load an avatar.
+        """
+        if any("tail" in name.lower() for name in _glb_node_names(cached)):
+            return cached
+        try:
+            raw = self._request_bytes(
+                "POST", f"/infer_joints?classify_id={encoded_id}&cached_only=true",
+                deadline, _MAX_JSON_BYTES, headers={"Accept": "application/json"},
+                missing_statuses=(404,))
+            if raw is None:
+                return cached
+            hints = json.loads(raw.decode("utf-8")).get("joint_hints") or []
+            if not any("tail" in str(h.get("name", "")).lower()
+                       for h in hints if isinstance(h, dict)):
+                return cached
+            progress(0.30, "Giving your avatar a tail...")
+            return self._rig_and_download(
+                f"classify_id={encoded_id}", deadline, progress)
+        except (ProviderError, ValueError, UnicodeDecodeError) as exc:
+            _log.warning("kept the cached rig for %s; tail upgrade failed: %s",
+                         encoded_id, getattr(exc, "detail", "") or exc)
+            return cached
 
     def _joints_and_rig(self, classify_query: str, deadline: float,
                         progress: Progress) -> Rig:
@@ -431,6 +479,13 @@ class RealRigger(Rigger):
                 "I couldn't find all the joints in that avatar. Try a clearer drawing?",
                 detail=f"infer_joints response had no joints: {joint_response!r}")
 
+        rig = self._make_rig(self._rig_and_download(classify_query, deadline, progress))
+        progress(0.99, "Your avatar is ready!")
+        return rig
+
+    def _rig_and_download(self, classify_query: str, deadline: float,
+                          progress: Progress) -> bytes:
+        """POST /rig, wait for it, and download the rigged GLB."""
         progress(0.68, "Connecting the joints...")
         rig_task = self._request_json(
             "POST", f"/rig?{classify_query}", deadline)
@@ -445,10 +500,7 @@ class RealRigger(Rigger):
             message="Connecting the skeleton...")
 
         progress(0.94, "Bringing your avatar home...")
-        downloaded = self._request_bytes("GET", glb_url, deadline, _MAX_GLB_BYTES)
-        rig = self._make_rig(downloaded)
-        progress(0.99, "Your avatar is ready!")
-        return rig
+        return self._request_bytes("GET", glb_url, deadline, _MAX_GLB_BYTES)
 
     @staticmethod
     def _make_rig(downloaded: bytes) -> Rig:

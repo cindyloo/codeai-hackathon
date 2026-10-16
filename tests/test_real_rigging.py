@@ -205,6 +205,68 @@ def test_immediate_cache_hits_return_rewritten_glb():
     assert all(request.data is None for request in opener.requests[2:5])
 
 
+# -- a cached fish or bird from before tails existed --------------------------
+
+TAIL = frozenset({"tail", "tail_tip"})
+
+
+def _skin_names(glb):
+    document, _ = read_glb(glb)
+    return {document["nodes"][i]["name"] for i in document["skins"][0]["joints"]}
+
+
+def test_a_cached_fish_without_a_tail_is_rerigged_with_one():
+    old, new = make_glb(drop=TAIL), make_glb()
+    rigger, opener = rigger_with([
+        ("/classify", {"category": "animal", "classify_id": "fish-1"}),
+        ("/results/fish-1/fish-1_rigged.glb", old),
+        # cached_only: never runs the vision model. seg_server has added the
+        # tail to the stored joints and marked the rig stale.
+        ("/infer_joints?classify_id=fish-1&cached_only=true",
+         {"joint_hints": [{"name": "joint_pelvis"}, {"name": "joint_tail_base"},
+                          {"name": "joint_tail_tip"}]}),
+        ("/rig?classify_id=fish-1", {
+            "status": "completed",
+            "rigged_url": "http://worker.internal/files/rigged.glb"}),
+        ("/files/rigged.glb", new),
+    ])
+
+    rig = rigger.rig(b"png", "image/png", lambda *_: None)
+
+    assert TAIL <= _skin_names(rig.glb_bytes)
+    assert opener.responses == []
+
+
+def test_a_cached_rig_that_needs_no_tail_costs_one_lookup():
+    # A bee, say: its stored joints come back without a tail, so the cached
+    # rig is used as it is.
+    rigger, opener = rigger_with([
+        ("/classify", {"category": "animal", "classify_id": "bee-1"}),
+        ("/results/bee-1/bee-1_rigged.glb", make_glb(drop=TAIL)),
+        ("/infer_joints?classify_id=bee-1&cached_only=true",
+         {"joint_hints": [{"name": "joint_pelvis"}]}),
+    ])
+
+    rig = rigger.rig(b"png", "image/png", lambda *_: None)
+
+    assert not TAIL & _skin_names(rig.glb_bytes)
+    assert opener.responses == []
+
+
+@pytest.mark.parametrize("failure", [not_found, server_error])
+def test_a_failed_tail_upgrade_keeps_the_cached_rig(failure):
+    rigger, opener = rigger_with([
+        ("/classify", {"category": "animal", "classify_id": "old-1"}),
+        ("/results/old-1/old-1_rigged.glb", make_glb(drop=TAIL)),
+        ("/infer_joints?classify_id=old-1&cached_only=true", failure()),
+    ])
+
+    rig = rigger.rig(b"png", "image/png", lambda *_: None)
+
+    assert rig.format == "glb"
+    assert opener.responses == []
+
+
 def test_existing_rig_is_downloaded_without_restarting_remote_tasks():
     rigger, opener = rigger_with([
         ("/classify", {"category": "humanoid", "classify_id": "cached-1"}),

@@ -1,10 +1,11 @@
 // Phase 2 — describe a move in words, get a clip of poses back.
 
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { api } from "../api.js";
 import { addClip, goTo, isModelClip, refreshBehaviours, state } from "../store.js";
 import { AvatarCanvas } from "./AvatarCanvas.js";
 import { MoveBuilder } from "./MoveBuilder.js";
+import { MoveCombiner } from "./MoveCombiner.js";
 
 const SUGGESTIONS = [
   "waves arms in the air",
@@ -17,7 +18,7 @@ const SUGGESTIONS = [
 ];
 
 export const StepPose = {
-  components: { AvatarCanvas, MoveBuilder },
+  components: { AvatarCanvas, MoveBuilder, MoveCombiner },
   setup() {
     const prompt = ref("waves arms in the air");
     const busy = ref(false);
@@ -25,9 +26,11 @@ export const StepPose = {
     const message = ref("");
     const error = ref(null);
     const saved = ref(null);
-    // Building a move by hand takes over the canvas: it shows the sliders'
-    // live pose, or the captured poses when the builder plays them.
-    const building = ref(false);
+    // Building a move by hand ("build") or combining moves ("combine") takes
+    // over the canvas: the sliders' live pose, the captured poses played, or
+    // the combination as it's put together.
+    const mode = ref("");
+    const building = computed(() => Boolean(mode.value));
     const builderPreview = ref({ pose: null, clip: null });
 
     async function generate() {
@@ -62,10 +65,13 @@ export const StepPose = {
 
     return {
       prompt, busy, progress, message, error, state, saved, fromModel,
-      SUGGESTIONS, generate, saveAsBehaviour, goTo, building, builderPreview,
-      select: (clip) => { building.value = false; state.activeClip = clip; },
-      startBuilding: () => { building.value = true; },
-      builderSaved: () => { building.value = false; },
+      SUGGESTIONS, generate, saveAsBehaviour, goTo, building, builderPreview, mode,
+      select: (clip) => { mode.value = ""; state.activeClip = clip; },
+      open: (which) => {
+        builderPreview.value = { pose: null, clip: null };
+        mode.value = mode.value === which ? "" : which;
+      },
+      builderSaved: () => { mode.value = ""; },
       use: (text) => { prompt.value = text; generate(); },
     };
   },
@@ -100,16 +106,21 @@ export const StepPose = {
           <p v-if="error" class="error">{{ error }}</p>
 
           <div class="row">
-            <button v-if="!building" class="ghost" @click="startBuilding">
-              Build a move by hand
+            <button class="ghost" :class="{ active: mode === 'build' }"
+                    @click="open('build')">
+              {{ mode === 'build' ? 'Close the builder' : 'Build a move by hand' }}
             </button>
-            <button v-else class="ghost" @click="building = false">
-              Close the builder
+            <button class="ghost" :class="{ active: mode === 'combine' }"
+                    :disabled="state.clips.length < 1" @click="open('combine')">
+              {{ mode === 'combine' ? 'Close the combiner' : 'Combine moves' }}
             </button>
           </div>
-          <MoveBuilder v-if="building"
+          <MoveBuilder v-if="mode === 'build'"
                        @preview="builderPreview = $event"
                        @saved="builderSaved" />
+          <MoveCombiner v-if="mode === 'combine'"
+                        @preview="builderPreview = $event"
+                        @saved="builderSaved" />
 
           <h3 v-if="state.clips.length">Moves you've made</h3>
           <ul class="clip-list">
@@ -141,10 +152,15 @@ export const StepPose = {
           <AvatarCanvas v-if="building" :rig="state.avatar.rig"
                         :pose="builderPreview.pose" :stretch="builderPreview.stretch || 0"
                         :clip="builderPreview.clip"
-                        :label="builderPreview.clip ? 'Your poses' : 'Sliders'" />
+                        :label="mode === 'combine' ? (builderPreview.clip ? 'Combined' : 'Pick some moves')
+                               : builderPreview.clip ? 'Your poses' : 'Sliders'" />
           <AvatarCanvas v-else :rig="state.avatar.rig" :clip="state.activeClip"
                         :label="state.activeClip ? state.activeClip.name : 'Waiting'" />
-          <p class="muted" v-if="building">
+          <p class="muted" v-if="mode === 'combine'">
+            Each part of the body plays the move you picked for it, all at
+            once. Try a tail wag with a fin flap at 2× speed.
+          </p>
+          <p class="muted" v-else-if="building">
             Move the sliders to pose your avatar, then add the pose. Add a few
             to make it move.
           </p>
