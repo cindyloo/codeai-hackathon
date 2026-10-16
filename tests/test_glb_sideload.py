@@ -13,7 +13,7 @@ import gltf
 import providers
 from jobs import runner
 from rewards import quat_from_euler
-from schemas import BONES, OPTIONAL_BONES, Rig
+from schemas import ARM_BONES, BONES, LEG_BONES, TAIL_BONES, Rig
 from store import store
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mixamo-style.glb"
@@ -183,12 +183,45 @@ def test_sideload_names_the_missing_required_joint(client):
 def test_sideload_accepts_a_rig_without_arms(client):
     document, binary = gltf.read_glb(FIXTURE.read_bytes())
     bones = gltf.resolve_bones(document)
-    for bone in OPTIONAL_BONES:
+    for bone in ARM_BONES:
         document["nodes"][bones[bone]]["name"] = f"unmapped_{bone}"
 
     response = post_glb(client, gltf.write_glb(document, binary))
 
     assert response.status_code == 201
+
+
+def test_sideload_accepts_a_rig_without_legs(client):
+    # A fish: seg_server gives it fins for arms and no legs at all.
+    document, binary = gltf.read_glb(FIXTURE.read_bytes())
+    bones = gltf.resolve_bones(document)
+    for bone in LEG_BONES:
+        document["nodes"][bones[bone]]["name"] = f"unmapped_{bone}"
+
+    response = post_glb(client, gltf.write_glb(document, binary))
+
+    assert response.status_code == 201, response.get_json()
+
+
+def test_an_avatar_lists_the_bones_its_model_has(client):
+    # Stand two of the fixture's joints in for seg_server's fish tail.
+    document, binary = gltf.read_glb(FIXTURE.read_bytes())
+    bones = gltf.resolve_bones(document)
+    document["nodes"][bones["L_hand"]]["name"] = "joint_tail_base"
+    document["nodes"][bones["R_hand"]]["name"] = "joint_tail_tip"
+
+    with_tail = post_glb(client, gltf.write_glb(document, binary)).get_json()
+    plain = post_glb(client, FIXTURE.read_bytes()).get_json()
+
+    assert {"tail", "tail_tip"} <= set(with_tail["bones"])
+    assert not {"L_hand", "R_hand"} & set(with_tail["bones"])
+    assert set(plain["bones"]) == set(BONES) - TAIL_BONES
+
+
+def test_the_stick_figure_has_no_tail():
+    avatar = app_module._add_avatar(Rig(format="procedural", skeleton=list(BONES)))
+    assert not TAIL_BONES & set(avatar.bones)
+    assert not TAIL_BONES & set(avatar.to_json()["rig"]["bone_tree"])
 
 
 def test_sideload_renames_seg_server_joints(client):
@@ -205,7 +238,7 @@ def test_sideload_renames_seg_server_joints(client):
 
     assert response.status_code == 201
     stored = store.get_avatar(response.get_json()["id"]).rig.glb_bytes
-    assert set(gltf.resolve_bones(gltf.read_glb(stored)[0])) == set(BONES)
+    assert set(gltf.resolve_bones(gltf.read_glb(stored)[0])) == set(BONES) - TAIL_BONES
 
 
 def animated_fixture(name="walk"):

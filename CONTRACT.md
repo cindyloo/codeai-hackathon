@@ -14,7 +14,7 @@ signatures in `providers/base.py`, checks in `tests/test_contract.py`.
 
 ## Skeleton
 
-16 bones. Defined in `schemas.BONE_TREE`, served at `GET /api/schema`.
+18 bones. Defined in `schemas.BONE_TREE`, served at `GET /api/schema`.
 
 ```
 root
@@ -22,18 +22,25 @@ root
         │        ├ L_shoulder ─ L_elbow ─ L_hand
         │        └ R_shoulder ─ R_elbow ─ R_hand
         ├ L_hip ─ L_knee ─ L_foot
-        └ R_hip ─ R_knee ─ R_foot
+        ├ R_hip ─ R_knee ─ R_foot
+        └ tail ─ tail_tip                      (fish only)
 ```
 
 The set is closed: any other bone name raises `ContractError`.
 
-A GLB rig may lack the six arm bones (`schemas.OPTIONAL_BONES`: shoulders,
-elbows, hands) — an armless character such as a tomato with legs is still an
-avatar, and poses leave the missing limbs alone. Every other bone is required.
-Training still scores against the full 16-bone figure, so an armless avatar
-can be rewarded for arm moves it cannot show.
+A GLB rig may lack any of the twelve limb bones and the two tail bones
+(`schemas.OPTIONAL_BONES`: the arms' shoulders, elbows and hands, the legs'
+hips, knees and feet, and `tail`, `tail_tip`). An armless tomato with legs is
+still an avatar, and so is a fish: seg_server rigs one as a spine with fins
+and a tail; the pectoral fins drive the arm bones, `joint_tail_base` and
+`joint_tail_tip` the tail, and it has no legs. Poses leave missing bones
+alone. The body — hips, spine, neck, head — is required. Each avatar's
+`bones` lists the ones its model really has. The tail points straight back
+(-Z): `tail` y wags it, x lifts it. The stick figure draws no tail. Training
+still scores against the full figure, so a fish can be rewarded for leg moves
+it cannot show.
 
-11 of the 16 are articulated (`schemas.ARTICULATED_BONES`) — training moves only
+12 of the 18 are articulated (`schemas.ARTICULATED_BONES`) — training moves only
 these. Hands and feet follow their parents.
 
 ## Pose
@@ -61,6 +68,23 @@ Bone name → local rotation relative to rest, quaternion `[x, y, z, w]`.
 | Lean forward | `spine` x = +30 |
 
 Rotating an arm about X has no effect; the arm lies along the X axis.
+
+### Squash and stretch
+
+A keyframe may also carry `stretch`, a whole-figure squash and stretch as a
+fraction of height, within ±0.5 (`schemas.MAX_STRETCH`). The figure scales
+about its feet: `1 + stretch` tall and `1 / sqrt(1 + stretch)` wide, so its
+volume holds. `0.4` is 40% taller and thinner, `-0.4` 40% shorter and wider.
+Omitted means 0.
+
+```json
+{ "t": 0.8, "pose": { "spine": [0, 0, 0, 1] }, "stretch": -0.3 }
+```
+
+It is not part of the pose: training ignores it. In an exported GLB it is a
+`scale` animation on a node named `stretch_pivot` at the model's feet, above
+everything else in the scene, and loading that file back reads it as
+`stretch` again.
 
 ## Clip
 

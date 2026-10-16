@@ -11,27 +11,62 @@ import { api } from "../api.js";
 import { sequenceKeyframes } from "../pose.js";
 import { addClip, state } from "../store.js";
 
+// Each slider names the bone it moves (`bone`, prefixed with the part's
+// `side` for a limb), and shows only if the avatar's model has that bone: a
+// pufferfish gets a tail and no legs, the broccoli no tail, a bird its wings
+// (as arms), legs and tail. A bird's leg has no knee, so no "Bend knee".
 const ARM = [
-  { id: "raise", label: "Raise", min: -80, max: 110 },
-  { id: "swing", label: "Forward / back", min: -70, max: 70 },
-  { id: "bend", label: "Bend elbow", min: 0, max: 130 },
+  { id: "raise", label: "Raise", min: -80, max: 110, bone: "shoulder" },
+  { id: "swing", label: "Forward / back", min: -70, max: 70, bone: "shoulder" },
+  { id: "bend", label: "Bend elbow", min: 0, max: 130, bone: "elbow" },
 ];
 const LEG = [
-  { id: "swing", label: "Forward / back", min: -70, max: 70 },
-  { id: "out", label: "Out to the side", min: 0, max: 45 },
-  { id: "bend", label: "Bend knee", min: 0, max: 120 },
+  { id: "swing", label: "Forward / back", min: -70, max: 70, bone: "hip" },
+  { id: "out", label: "Out to the side", min: 0, max: 45, bone: "hip" },
+  { id: "bend", label: "Bend knee", min: 0, max: 120, bone: "knee" },
 ];
 const PARTS = [
-  { id: "head", label: "Head", controls: [
-    { id: "nod", label: "Nod", min: -40, max: 40 },
-    { id: "turn", label: "Turn", min: -70, max: 70 },
-    { id: "tilt", label: "Tilt", min: -35, max: 35 },
+  { id: "body", label: "Whole body", controls: [
+    // Percent of height: + is taller and thinner, - is shorter and wider.
+    // Scales the whole model, so it needs no particular bone.
+    { id: "stretch", label: "Stretch / squash", min: -40, max: 40, unit: "%" },
   ] },
-  { id: "L_arm", label: "Left arm", controls: ARM },
-  { id: "R_arm", label: "Right arm", controls: ARM },
-  { id: "L_leg", label: "Left leg", controls: LEG },
-  { id: "R_leg", label: "Right leg", controls: LEG },
+  { id: "head", label: "Head", controls: [
+    { id: "nod", label: "Nod", min: -40, max: 40, bone: "head" },
+    { id: "turn", label: "Turn", min: -70, max: 70, bone: "head" },
+    { id: "tilt", label: "Tilt", min: -35, max: 35, bone: "head" },
+  ] },
+  { id: "L_arm", label: "Left arm", side: "L", controls: ARM },
+  { id: "R_arm", label: "Right arm", side: "R", controls: ARM },
+  { id: "L_leg", label: "Left leg", side: "L", controls: LEG },
+  { id: "R_leg", label: "Right leg", side: "R", controls: LEG },
+  // It points straight back from the hips.
+  { id: "tail", label: "Tail", controls: [
+    { id: "wag", label: "Wag", min: -45, max: 45, bone: "tail" },
+    { id: "lift", label: "Lift", min: -30, max: 30, bone: "tail" },
+    { id: "curl", label: "Curl the tip", min: -45, max: 45, bone: "tail_tip" },
+  ] },
 ];
+
+/** The contract bone a slider moves, or null for one that needs none. */
+function boneOf(part, control) {
+  if (!control.bone) return null;
+  return part.side ? `${part.side}_${control.bone}` : control.bone;
+}
+
+/** The parts and sliders for a model with these bones. */
+export function partsFor(bones) {
+  const has = new Set(bones);
+  return PARTS
+    .map((part) => ({
+      ...part,
+      controls: part.controls.filter((c) => {
+        const bone = boneOf(part, c);
+        return !bone || has.has(bone);
+      }),
+    }))
+    .filter((part) => part.controls.length);
+}
 
 function restValues() {
   return Object.fromEntries(PARTS.map((part) => [
@@ -67,8 +102,13 @@ function toPose(v) {
     R_hip: quat(-v.R_leg.swing, 0, v.R_leg.out),
     L_knee: quat(v.L_leg.bend, 0, 0),
     R_knee: quat(v.R_leg.bend, 0, 0),
+    tail: quat(v.tail.lift, v.tail.wag, 0),
+    tail_tip: quat(0, v.tail.curl, 0),
   };
 }
+
+/** Slider percent -> Keyframe.stretch. */
+const toStretch = (v) => v.body.stretch / 100;
 
 const copy = (values) => JSON.parse(JSON.stringify(values));
 
@@ -81,9 +121,12 @@ export const MoveBuilder = {
     const busy = ref(false);
     const error = ref(null);
 
-    const livePose = () => emit("preview", { pose: toPose(values), clip: null });
+    const livePose = () => emit("preview", {
+      pose: toPose(values), stretch: toStretch(values), clip: null,
+    });
 
-    const keyframes = () => sequenceKeyframes(poses.value.map(toPose));
+    const keyframes = () => sequenceKeyframes(
+      poses.value.map(toPose), poses.value.map(toStretch));
 
     function addPose() {
       poses.value.push(copy(values));
@@ -106,6 +149,7 @@ export const MoveBuilder = {
     function play() {
       emit("preview", {
         pose: null,
+        stretch: 0,
         clip: { name: name.value, fps: 24, loop: true, keyframes: keyframes() },
       });
     }
@@ -132,22 +176,24 @@ export const MoveBuilder = {
 
     livePose();
 
+    const parts = computed(() => partsFor(state.avatar?.bones || []));
+
     return {
-      PARTS, values, poses, name, busy, error,
+      parts, values, poses, name, busy, error,
       canSave: computed(() => poses.value.length > 0 && name.value.trim()),
       livePose, addPose, loadPose, removePose, resetSliders, play, save,
     };
   },
   template: `
     <div class="move-builder">
-      <fieldset v-for="part in PARTS" :key="part.id">
+      <fieldset v-for="part in parts" :key="part.id">
         <legend>{{ part.label }}</legend>
         <div v-for="c in part.controls" :key="c.id" class="slider-row">
           <label :for="part.id + '-' + c.id">{{ c.label }}</label>
           <input :id="part.id + '-' + c.id" type="range"
                  :min="c.min" :max="c.max" step="1"
                  v-model.number="values[part.id][c.id]" @input="livePose">
-          <output>{{ values[part.id][c.id] }}°</output>
+          <output>{{ values[part.id][c.id] }}{{ c.unit || '°' }}</output>
         </div>
       </fieldset>
 

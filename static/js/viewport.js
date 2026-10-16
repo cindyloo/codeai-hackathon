@@ -12,7 +12,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
-import { performableClip, samplePose } from "./pose.js";
+import { performableClip, samplePose, sampleStretch } from "./pose.js";
 
 const BODY_COLOUR = 0x6c5ce7;
 const GHOST_COLOUR = 0xb6c2e1;
@@ -268,6 +268,7 @@ export class Viewport {
     this.glbGroup = null;
     this.skinned = [];
     this._reverseBones = null;
+    this.stretchBase = null;
 
     if (rig.format === "glb" && rig.glb_url) {
       await this.#loadGlb(rig);
@@ -277,6 +278,7 @@ export class Viewport {
       this.limbs = built.limbs;
       this.root.add(built.group);
     }
+    this.#captureStretchBase(this.glbGroup || this.root.children.at(-1));
 
     if (this.ghostEnabled) {
       if (this.glbGroup) this.#buildGlbGhost();
@@ -583,7 +585,7 @@ export class Viewport {
     this.paused = false;
     this.playing = Boolean(this.clip);
     this.elapsed = 0;
-    if (this.clip) this.applyPose(samplePose(this.clip, 0));
+    if (this.clip) this.#showClipAt(0);
     if (this.renderMode) this.#updateRenderCamera(0, true);
   }
 
@@ -756,7 +758,54 @@ export class Viewport {
     this.playing = Boolean(clip);
     this.clock.start();
     this.elapsed = 0;
-    if (clip) this.applyPose(samplePose(clip, 0));
+    if (clip) this.#showClipAt(0);
+    else this.setStretch(0);
+  }
+
+  /** Show the current clip's pose and stretch at `seconds`. */
+  #showClipAt(seconds) {
+    this.applyPose(samplePose(this.clip, seconds));
+    this.setStretch(sampleStretch(this.clip, seconds));
+  }
+
+  // -- squash and stretch ------------------------------------------------
+
+  /**
+   * Remember the figure's resting scale and where its feet are, so a stretch
+   * can scale it about the ground rather than about its middle.
+   */
+  #captureStretchBase(figure) {
+    if (!figure) return;
+    this.root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(figure);
+    if (box.isEmpty()) return;
+    const feet = this.root.worldToLocal(new THREE.Vector3(
+      (box.min.x + box.max.x) / 2, box.min.y, (box.min.z + box.max.z) / 2));
+    this.stretchBase = {
+      figure,
+      position: figure.position.clone(),
+      scale: figure.scale.clone(),
+      pivot: feet,
+    };
+  }
+
+  /**
+   * Squash (negative) or stretch (positive) the whole figure, as a fraction
+   * of its height: 1 + stretch tall, 1 / sqrt(1 + stretch) wide, so it keeps
+   * its volume. Matches gltf.stretch_scale on the server.
+   */
+  setStretch(stretch = 0) {
+    const base = this.stretchBase;
+    if (!base) return;
+    const tall = 1 + stretch;
+    const wide = 1 / Math.sqrt(tall);
+    const { figure, position, scale, pivot } = base;
+    figure.scale.set(scale.x * wide, scale.y * tall, scale.z * wide);
+    figure.position.set(
+      pivot.x + (position.x - pivot.x) * wide,
+      pivot.y + (position.y - pivot.y) * tall,
+      pivot.z + (position.z - pivot.z) * wide,
+    );
   }
 
   /** Jump to a specific time in the current clip (for the scrubber). */
@@ -764,7 +813,7 @@ export class Viewport {
     if (!this.clip) return;
     this.playing = false;
     this.elapsed = seconds;
-    this.applyPose(samplePose(this.clip, seconds));
+    this.#showClipAt(seconds);
   }
 
   /**
@@ -854,11 +903,11 @@ export class Viewport {
     const delta = this.clock.getDelta();
     if (this.captureStartedAt !== null) {
       this.elapsed = Math.max(0, (now - this.captureStartedAt) / 1000);
-      if (this.clip) this.applyPose(samplePose(this.clip, this.elapsed * this.speed));
+      if (this.clip) this.#showClipAt(this.elapsed * this.speed);
       this.#updateRenderCamera(this.elapsed, true);
     } else if (!this.paused && this.playing && this.clip) {
       this.elapsed += delta * this.speed;
-      this.applyPose(samplePose(this.clip, this.elapsed));
+      this.#showClipAt(this.elapsed);
       if (!this.clip.loop && this.elapsed >= this.clip.duration) this.playing = false;
     }
 

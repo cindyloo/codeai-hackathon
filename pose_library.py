@@ -35,6 +35,10 @@ LEGS. Both legs rest along -Y.
 
 SPINE. +X leans forward, z tilts side to side.
 
+TAIL (fish only). The tail points straight back, along -Z.
+  wag:          tail y = +/-25 swings it side to side; tail_tip y bends the end
+  lift:         tail x = +20 raises it
+
 All angles are degrees, applied XYZ.
 """
 
@@ -113,6 +117,26 @@ def walk() -> list[Keyframe]:
     ]
 
 
+def swim() -> list[Keyframe]:
+    """A fish's swim: the tail wags side to side (+/-30, the size of a wag
+    built and trained on Teach), its tip following through, while the fins
+    flap up and down — up at each end of the wag, down as the tail passes
+    the middle, so twice a stroke. The body curves a little into each wag.
+    On a figure with arms and no tail it reads as flapping."""
+    def frame(t, wag, tip, fins_up, curve):
+        # Fins up: the left arm raises with negative z, the right positive.
+        return kf(t, tail=(0, wag, 0), tail_tip=(0, tip, 0),
+                  L_shoulder=(0, 0, -fins_up), R_shoulder=(0, 0, fins_up),
+                  spine=(0, curve, 0), head=(0, -curve / 2, 0))
+    return [
+        frame(0.00, -30, -20, 25, 8),
+        frame(0.25, 0, -15, -15, 0),
+        frame(0.50, 30, 20, 25, -8),
+        frame(0.75, 0, 15, -15, 0),
+        frame(1.00, -30, -20, 25, 8),
+    ]
+
+
 def t_pose() -> list[Keyframe]:
     return [kf(0.0)]
 
@@ -144,6 +168,7 @@ LIBRARY: list[tuple[tuple[str, ...], str, callable, bool]] = [
     (("star jump", "jumping jack"), "Star jump", star_jump, False),
     (("wave", "waving", "hello", "hi ", "greet"), "Wave", wave, True),
     (("jump", "hop", "leap"), "Jump", jump, True),
+    (("swim", "paddle", "flap fins", "flaps its fins"), "Swim", swim, True),
     (("dance", "dancing", "boogie", "wiggle"), "Dance", dance, True),
     (("walk", "walking", "step", "march"), "Walk", walk, True),
     (("bow", "bowing", "thank you"), "Bow", bow, False),

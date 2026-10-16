@@ -16,11 +16,18 @@ export const POSE_SECONDS = 0.8;
  * Poses in order -> keyframes, one every POSE_SECONDS. Two or more end on the
  * first pose again so the loop doesn't snap back; a single pose stays a
  * single keyframe, which plays as T-pose -> pose -> T-pose.
+ *
+ * `stretches`, if given, is one squash/stretch amount per pose (see
+ * Keyframe.stretch in schemas.py); zero is left out of the keyframe.
  */
-export function sequenceKeyframes(poses) {
-  const frames = poses.map((pose, i) => ({ t: i * POSE_SECONDS, pose }));
+export function sequenceKeyframes(poses, stretches = []) {
+  const frames = poses.map((pose, i) => {
+    const frame = { t: i * POSE_SECONDS, pose };
+    if (stretches[i]) frame.stretch = stretches[i];
+    return frame;
+  });
   if (frames.length > 1) {
-    frames.push({ t: frames.length * POSE_SECONDS, pose: frames[0].pose });
+    frames.push({ ...frames[0], t: frames.length * POSE_SECONDS });
   }
   return frames;
 }
@@ -33,7 +40,7 @@ export function sequenceKeyframes(poses) {
  */
 export function performableClip(clip) {
   if (clip?.keyframes?.length !== 1) return clip;
-  const pose = clip.keyframes[0].pose;
+  const { pose, stretch = 0 } = clip.keyframes[0];
   const rest = Object.fromEntries(Object.keys(pose).map((b) => [b, IDENTITY]));
   return {
     ...clip,
@@ -41,11 +48,30 @@ export function performableClip(clip) {
     duration: 3,
     keyframes: [
       { t: 0, pose: rest },
-      { t: 1, pose },
-      { t: 2, pose },
+      { t: 1, pose, stretch },
+      { t: 2, pose, stretch },
       { t: 3, pose: rest },
     ],
   };
+}
+
+/** A clip's squash/stretch at time `t`, interpolated linearly; 0 if none. */
+export function sampleStretch(clip, t) {
+  const frames = clip?.keyframes;
+  if (!frames?.length) return 0;
+  if (frames.length === 1) return frames[0].stretch || 0;
+
+  const duration = clip.duration || frames[frames.length - 1].t;
+  const time = clip.loop && duration > 0 ? t % duration : Math.min(t, duration);
+
+  let index = 0;
+  while (index < frames.length - 2 && frames[index + 1].t <= time) index += 1;
+
+  const from = frames[index];
+  const to = frames[index + 1];
+  const span = to.t - from.t;
+  const alpha = span > 0 ? Math.min(Math.max((time - from.t) / span, 0), 1) : 0;
+  return (from.stretch || 0) + ((to.stretch || 0) - (from.stretch || 0)) * alpha;
 }
 
 /** Sample a clip at time `t` (seconds), interpolating between keyframes. */

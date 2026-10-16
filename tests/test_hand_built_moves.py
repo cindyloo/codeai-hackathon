@@ -42,7 +42,7 @@ def test_a_single_pose_is_a_move(client):
 @pytest.mark.parametrize("body", [
     {"name": "", "keyframes": [{"t": 0, "pose": ARMS_UP}]},
     {"name": "Nothing", "keyframes": []},
-    {"name": "Bad bone", "keyframes": [{"t": 0, "pose": {"tail": [0, 0, 0, 1]}}]},
+    {"name": "Bad bone", "keyframes": [{"t": 0, "pose": {"wing": [0, 0, 0, 1]}}]},
 ])
 def test_refuses_a_move_it_cannot_play(client, body):
     response = client.post("/api/clips", json=body)

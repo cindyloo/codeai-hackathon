@@ -16,7 +16,7 @@ from typing import Any, Iterable
 # --------------------------------------------------------------------------
 # Skeleton
 # --------------------------------------------------------------------------
-# 16 bones, fixed names, fixed hierarchy. This set is CLOSED: a pose mentioning
+# 18 bones, fixed names, fixed hierarchy. This set is CLOSED: a pose mentioning
 # any other name is a hard error, not a silent drop. Cross-team drift in bone
 # naming is the single most likely way this prototype breaks, so we fail loudly.
 
@@ -42,18 +42,31 @@ BONE_TREE: dict[str, tuple[str | None, tuple[float, float, float]]] = {
     "R_hip":      ("hips",        (0.10, -0.05, 0.0)),
     "R_knee":     ("R_hip",       (0.00, -0.35, 0.0)),
     "R_foot":     ("R_knee",      (0.00, -0.35, 0.0)),
+
+    # A fish's tail, straight out behind (-Z; the figure faces +Z). Only a
+    # rig that has one carries it; the stick figure doesn't draw it.
+    "tail":       ("hips",        (0.00, -0.05, -0.20)),
+    "tail_tip":   ("tail",        (0.00,  0.00, -0.25)),
 }
 
 BONES: list[str] = list(BONE_TREE)
 BONE_SET: frozenset[str] = frozenset(BONES)
 
-#: Bones a GLB rig may lack. An armless character (seg_server rigs a tomato
-#: with legs as a 12-joint biped) is still an avatar; poses simply leave the
-#: missing limbs alone. Every other bone must be present.
-OPTIONAL_BONES: frozenset[str] = frozenset({
+#: The limbs (and a tail), which a GLB rig may lack. seg_server rigs a tomato with legs
+#: as an armless biped, and a fish as a spine with fins (rigged as arms) and
+#: no legs at all; both are still avatars, and poses simply leave the missing
+#: limbs alone. The body — hips, spine, neck, head — must be present.
+ARM_BONES: frozenset[str] = frozenset({
     "L_shoulder", "L_elbow", "L_hand",
     "R_shoulder", "R_elbow", "R_hand",
 })
+LEG_BONES: frozenset[str] = frozenset({
+    "L_hip", "L_knee", "L_foot",
+    "R_hip", "R_knee", "R_foot",
+})
+#: Only a fish has these: seg_server adds a tail to fish, behind the body.
+TAIL_BONES: frozenset[str] = frozenset({"tail", "tail_tip"})
+OPTIONAL_BONES: frozenset[str] = ARM_BONES | LEG_BONES | TAIL_BONES
 
 #: Bones a learner is allowed to move during training. Feet/hands are IK-ish
 #: leaves that follow their parents; letting the policy drive them makes the
@@ -64,6 +77,7 @@ ARTICULATED_BONES: list[str] = [
     "R_shoulder", "R_elbow",
     "L_hip", "L_knee",
     "R_hip", "R_knee",
+    "tail",
 ]
 
 #: Contract bone -> the equivalent bone in a Mixamo-convention skeleton, which
@@ -129,6 +143,9 @@ REST_POSE: dict[str, list[float]] = {b: list(IDENTITY_QUAT) for b in BONES}
 
 MAX_KEYFRAMES = 240
 MAX_CLIP_DURATION = 30.0
+#: Squash and stretch, as a fraction of height: +0.4 is 40% taller (and
+#: thinner), -0.4 is 40% shorter (and wider). See Keyframe.stretch.
+MAX_STRETCH = 0.5
 QUAT_TOLERANCE = 1e-3
 
 
@@ -185,8 +202,11 @@ class Rig:
         return {
             "format": self.format,
             "skeleton": self.skeleton,
+            # The stick figure is a person, so it draws no tail; a GLB needs
+            # the whole tree to retarget a pose onto whatever bones it has.
             "bone_tree": {k: {"parent": v[0], "offset": list(v[1])}
-                          for k, v in BONE_TREE.items()},
+                          for k, v in BONE_TREE.items()
+                          if self.format == "glb" or k not in TAIL_BONES},
             # The viewport needs these to find bones in a GLB, and it only ever
             # sees the rig object — so they ride here as well as on /api/schema.
             "bone_aliases": {"mixamo": MIXAMO_BONE_MAP},
@@ -199,9 +219,16 @@ class Rig:
 class Keyframe:
     t: float                       # seconds from clip start
     pose: dict[str, list[float]]   # bone name -> [x, y, z, w]
+    #: Whole-figure squash and stretch, -MAX_STRETCH..MAX_STRETCH. The figure
+    #: is scaled about its feet, 1 + stretch tall and 1/sqrt(1 + stretch)
+    #: wide, so its volume holds. Not part of the pose: training ignores it.
+    stretch: float = 0.0
 
     def to_json(self) -> dict[str, Any]:
-        return {"t": self.t, "pose": self.pose}
+        out = {"t": self.t, "pose": self.pose}
+        if self.stretch:
+            out["stretch"] = self.stretch
+        return out
 
 
 @dataclass
@@ -385,6 +412,15 @@ def validate_clip(clip: Any, *, where: str = "clip") -> Clip:
     for i, kf in enumerate(keyframes):
         t = kf.t if isinstance(kf, Keyframe) else kf.get("t")
         pose = kf.pose if isinstance(kf, Keyframe) else kf.get("pose")
+        stretch = kf.stretch if isinstance(kf, Keyframe) else kf.get("stretch", 0.0)
+        try:
+            stretch = float(stretch or 0.0)
+        except (TypeError, ValueError):
+            raise ContractError(f"{where}.keyframes[{i}].stretch: expected a "
+                                f"number, got {stretch!r}") from None
+        if not math.isfinite(stretch) or abs(stretch) > MAX_STRETCH:
+            raise ContractError(f"{where}.keyframes[{i}].stretch: must be within "
+                                f"±{MAX_STRETCH}, got {stretch}")
         try:
             t = float(t)
         except (TypeError, ValueError):
@@ -401,7 +437,7 @@ def validate_clip(clip: Any, *, where: str = "clip") -> Clip:
                                 f"{MAX_CLIP_DURATION}s clip limit")
         last_t = t
         out.append(Keyframe(t=t, pose=validate_pose(
-            pose, where=f"{where}.keyframes[{i}].pose")))
+            pose, where=f"{where}.keyframes[{i}].pose"), stretch=stretch))
 
     return Clip(id=cid, name=str(name)[:80], keyframes=out, fps=fps,
                 prompt=str(prompt)[:400], loop=loop)

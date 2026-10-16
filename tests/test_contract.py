@@ -290,8 +290,9 @@ class TestGlbRig:
     """
 
     def test_every_contract_bone_has_a_mixamo_alias(self):
-        from schemas import MIXAMO_BONE_MAP
-        assert set(MIXAMO_BONE_MAP) == BONE_SET
+        from schemas import MIXAMO_BONE_MAP, TAIL_BONES
+        # Mixamo skeletons are people; only a fish has a tail.
+        assert set(MIXAMO_BONE_MAP) == BONE_SET - TAIL_BONES
 
     def test_aliases_are_unique(self):
         """Two contract bones pointing at one GLB node means one silently wins."""

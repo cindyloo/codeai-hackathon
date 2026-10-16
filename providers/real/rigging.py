@@ -99,6 +99,37 @@ _REMOTE_JOINT_ALIASES: dict[str, str] = {
     "joint_foot_right": "R_foot",
     "joint_r_foot": "R_foot",
     "joint_foot_r": "R_foot",
+
+    # A fish's pectoral fins stick out sideways where arms would, so they
+    # drive the arm bones: raising, swinging and flapping all read as fin
+    # moves. Its dorsal fin has no contract bone and follows the body; its
+    # tail is the contract's tail.
+    "joint_fin_base_left": "L_shoulder",
+    "joint_fin_left_base": "L_shoulder",
+    "joint_left_fin_base": "L_shoulder",
+    "joint_fin_tip_left": "L_elbow",
+    "joint_fin_left_tip": "L_elbow",
+    "joint_left_fin_tip": "L_elbow",
+    "joint_fin_base_right": "R_shoulder",
+    "joint_fin_right_base": "R_shoulder",
+    "joint_right_fin_base": "R_shoulder",
+    "joint_fin_tip_right": "R_elbow",
+    "joint_fin_right_tip": "R_elbow",
+    "joint_right_fin_tip": "R_elbow",
+
+    # A bird's (or a bee's) wings are its arms: base, mid and tip are the
+    # shoulder, elbow and hand, so the arm sliders raise and flap them.
+    "joint_wing_base_left": "L_shoulder",
+    "joint_wing_mid_left": "L_elbow",
+    "joint_wing_tip_left": "L_hand",
+    "joint_wing_base_right": "R_shoulder",
+    "joint_wing_mid_right": "R_elbow",
+    "joint_wing_tip_right": "R_hand",
+
+    # seg_server adds a tail to fish and birds from the mesh (add_tail).
+    "joint_tail_base": "tail",
+    "joint_tail": "tail",
+    "joint_tail_tip": "tail_tip",
 }
 
 
@@ -185,6 +216,16 @@ def rewrite_glb_joint_names(glb_bytes: bytes, *, verify: bool = True) -> bytes:
                 _normalise_joint_name(name))
             if replacement:
                 node["name"] = replacement
+
+    # seg_server's flying skeleton has no pelvis: its body, legs and wings
+    # hang off joint_root, which then is the hips.
+    names = {nodes[i].get("name") for i in joint_indices}
+    if "hips" not in names:
+        for node_index in joint_indices:
+            name = nodes[node_index].get("name")
+            if isinstance(name, str) and _normalise_joint_name(name) == "joint_root":
+                nodes[node_index]["name"] = "hips"
+                break
 
     contract_nodes: dict[str, list[int]] = {bone: [] for bone in BONES}
     for node_index in joint_indices:

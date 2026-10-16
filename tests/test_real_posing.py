@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 import config
@@ -83,6 +85,30 @@ def test_static_library_prompt_never_calls_the_llm():
     name, keyframes, loop = pose_library.match("waves arms in the air")
     assert [kf.pose for kf in clip.keyframes] == _validated_poses(name, keyframes, loop)
     assert clip.loop == loop
+
+
+@pytest.mark.parametrize("prompt", ["swims", "the fish paddles along"])
+def test_swimming_is_a_library_move_for_fish(prompt):
+    # A fish has no legs: its swim is a tail wag with the fins (the arm
+    # bones) flapping up and down — and it costs no LLM call.
+    from rewards import quat_angle
+    from schemas import IDENTITY_QUAT
+    clip = RealPoser(complete_fn=always_boom).pose(prompt, RIG, noop)
+    assert clip.name == "Swim" and clip.loop
+    moved = {bone for kf in clip.keyframes for bone, q in kf.pose.items()
+             if abs(q[3]) < 0.999}
+    assert {"tail", "tail_tip", "L_shoulder", "R_shoulder"} <= moved
+    assert not moved & {"L_hip", "R_hip", "L_knee", "R_knee"}
+
+    def degrees(bone):
+        return [round(math.degrees(quat_angle(kf.pose[bone], IDENTITY_QUAT)))
+                for kf in clip.keyframes]
+    # The tail swings 30° each way...
+    assert max(degrees("tail")) == 30
+    # ...and the fins flap up and down twice a stroke: up at both ends of
+    # the wag, down in between.
+    raise_z = [kf.pose["L_shoulder"][2] for kf in clip.keyframes]
+    assert [z < 0 for z in raise_z] == [True, False, True, False, True]
 
 
 def test_llm_path_returns_generated_pose_for_unmatched_prompt():

@@ -31,6 +31,9 @@ class Avatar:
     #: clip id -> index of the GLB animation it came from. Export keeps only
     #: these, so a model move deleted on Play is left out of the download.
     model_animations: dict[str, int] = field(default_factory=dict)
+    #: Contract bones the model really has. A GLB may lack limbs, and only a
+    #: fish has a tail; the Teach sliders offer only what can move.
+    bones: list[str] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         glb_url = f"/api/avatars/{self.id}/glb" if self.rig.format == "glb" else None
@@ -40,6 +43,7 @@ class Avatar:
             "image_url": f"/api/avatars/{self.id}/image" if self.image_path else None,
             "rig": self.rig.to_json(glb_url=glb_url),
             "clips": [clip.to_json() for clip in self.clips],
+            "bones": self.bones,
         }
 
 

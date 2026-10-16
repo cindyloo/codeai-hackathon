@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from providers.real.rigging import GlbError, RealRigger, rewrite_glb_joint_names
-from schemas import BONES, OPTIONAL_BONES, ProviderError
+from schemas import ARM_BONES, BONES, LEG_BONES, ProviderError
 
 REMOTE_NAMES = {
     "hips": "joint_pelvis",
@@ -28,6 +28,8 @@ REMOTE_NAMES = {
     "R_hip": "joint_right_hip",
     "R_knee": "joint_right_knee",
     "R_foot": "joint_right_foot",
+    "tail": "joint_tail_base",
+    "tail_tip": "joint_tail_tip",
 }
 
 
@@ -511,7 +513,7 @@ def test_glb_rewriter_preserves_non_json_chunks_and_extra_nodes():
 
 
 @pytest.mark.parametrize(("kwargs", "message"), [
-    ({"missing": "R_foot"}, "missing contract bones: R_foot"),
+    ({"missing": "neck"}, "missing contract bones: neck"),
     ({"duplicate": "L_elbow"}, "duplicate contract bones: L_elbow"),
 ])
 def test_glb_rewriter_rejects_invalid_contract_skins(kwargs, message):
@@ -522,10 +524,75 @@ def test_glb_rewriter_rejects_invalid_contract_skins(kwargs, message):
 def test_glb_rewriter_accepts_an_armless_rig():
     # seg_server rigs a tomato with legs as a biped: no shoulders, elbows or
     # hands.
-    rewritten = rewrite_glb_joint_names(make_glb(drop=OPTIONAL_BONES))
+    rewritten = rewrite_glb_joint_names(make_glb(drop=ARM_BONES))
     names = {node["name"] for node in read_glb(rewritten)[0]["nodes"]}
-    assert names >= set(BONES) - OPTIONAL_BONES
-    assert not names & OPTIONAL_BONES
+    assert names >= set(BONES) - ARM_BONES
+    assert not names & ARM_BONES
+
+
+def _skin_glb(names):
+    nodes = [{"name": n} for n in names]
+    document = {"asset": {"version": "2.0"}, "nodes": nodes,
+                "skins": [{"joints": list(range(len(nodes)))}],
+                "scenes": [{"nodes": [0]}], "scene": 0}
+    json_chunk = json.dumps(document).encode()
+    json_chunk += b" " * (-len(json_chunk) % 4)
+    body = (struct.pack("<I4s", len(json_chunk), b"JSON") + json_chunk
+            + struct.pack("<I4s", 4, b"BIN\x00") + b"\0\0\0\0")
+    return struct.pack("<4sII", b"glTF", 2, len(body) + 12) + body
+
+
+def test_glb_rewriter_rigs_a_birds_wings_as_arms():
+    # seg_server's flying skeleton: no pelvis (root is the hips), wings with
+    # base, mid and tip, and legs that go hip -> foot with no knee.
+    glb = _skin_glb([
+        "joint_root", "joint_spine", "joint_chest", "joint_neck", "joint_head",
+        "joint_wing_base_left", "joint_wing_mid_left", "joint_wing_tip_left",
+        "joint_wing_base_right", "joint_wing_mid_right", "joint_wing_tip_right",
+        "joint_hip_left", "joint_foot_left", "joint_hip_right", "joint_foot_right",
+        "joint_tail_base", "joint_tail_tip"])
+
+    names = [n["name"] for n in read_glb(rewrite_glb_joint_names(glb))[0]["nodes"]]
+
+    assert names == [
+        "hips", "spine", "joint_chest", "neck", "head",
+        "L_shoulder", "L_elbow", "L_hand", "R_shoulder", "R_elbow", "R_hand",
+        "L_hip", "L_foot", "R_hip", "R_foot", "tail", "tail_tip"]
+
+
+def test_root_stays_root_when_there_is_a_pelvis():
+    glb = _skin_glb(["joint_root", "joint_pelvis", "joint_spine",
+                     "joint_neck", "joint_head"])
+    names = [n["name"] for n in read_glb(rewrite_glb_joint_names(glb))[0]["nodes"]]
+    assert names[:2] == ["joint_root", "hips"]
+
+
+def test_glb_rewriter_rigs_a_fishs_fins_as_arms():
+    # seg_server's pufferfish: a spine, a dorsal fin, two pectoral fins, a
+    # tail (add_fish_tail), no legs. The fins become the arm bones and the
+    # tail the tail; the dorsal fin stays as it is.
+    nodes = [{"name": n} for n in (
+        "joint_pelvis", "joint_spine", "joint_chest", "joint_neck",
+        "joint_head", "joint_dorsal_base", "joint_dorsal_tip",
+        "joint_fin_base_left", "joint_fin_tip_left",
+        "joint_fin_base_right", "joint_fin_tip_right",
+        "joint_tail_base", "joint_tail_tip")]
+    document = {"asset": {"version": "2.0"}, "nodes": nodes,
+                "skins": [{"joints": list(range(len(nodes)))}],
+                "scenes": [{"nodes": [0]}], "scene": 0}
+    json_chunk = json.dumps(document).encode()
+    json_chunk += b" " * (-len(json_chunk) % 4)
+    body = (struct.pack("<I4s", len(json_chunk), b"JSON") + json_chunk
+            + struct.pack("<I4s", 4, b"BIN\x00") + b"\0\0\0\0")
+    glb = struct.pack("<4sII", b"glTF", 2, len(body) + 12) + body
+
+    names = [n["name"] for n in read_glb(rewrite_glb_joint_names(glb))[0]["nodes"]]
+
+    assert names == ["hips", "spine", "joint_chest", "neck", "head",
+                     "joint_dorsal_base", "joint_dorsal_tip",
+                     "L_shoulder", "L_elbow", "R_shoulder", "R_elbow",
+                     "tail", "tail_tip"]
+    assert not set(names) & LEG_BONES
 
 
 def test_glb_rewriter_can_rename_without_verifying():

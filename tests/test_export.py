@@ -19,7 +19,14 @@ import export
 import gltf
 import providers
 from rewards import quat_from_euler
-from schemas import BONES, REST_POSE, TrainConfig, validate_clip, validate_rig
+from schemas import (
+    BONES,
+    REST_POSE,
+    TAIL_BONES,
+    TrainConfig,
+    validate_clip,
+    validate_rig,
+)
 from store import store
 from training import TrainingRun
 
@@ -75,7 +82,8 @@ class TestGlbContainer:
 class TestBoneResolution:
     def test_resolves_every_contract_bone(self, glb_bytes):
         document, _ = gltf.read_glb(glb_bytes)
-        assert set(gltf.resolve_bones(document)) == set(BONES)
+        # A Mixamo-style person has every bone but a fish's tail.
+        assert set(gltf.resolve_bones(document)) == set(BONES) - TAIL_BONES
 
     @pytest.mark.parametrize("mangled", [
         "mixamorig:LeftArm",       # as authored
@@ -346,7 +354,10 @@ class TestExportGlb:
         imported = gltf.read_clips(document, binary)[0]
         assert imported["name"] == f"{clip.name} (learned)"
         peak = next(k for k in imported["keyframes"] if k["t"] == 1.0)
+        assert set(export.final_pose(run)) - set(peak["pose"]) <= TAIL_BONES
         for bone, q in export.final_pose(run).items():
+            if bone not in peak["pose"]:
+                continue   # the tail: this model hasn't one
             got = peak["pose"][bone]
             assert abs(abs(sum(x * y for x, y in zip(q, got))) - 1) < 1e-3, bone
 
@@ -354,7 +365,8 @@ class TestExportGlb:
         run, avatar, clip = finished_run
         _, payload = export.build_glb(run, avatar, clip)
         assert payload["node_map"]["L_shoulder"].startswith("mixamorig")
-        assert payload["unmapped_bones"] == []
+        # Only the tail, which a person doesn't have.
+        assert sorted(payload["unmapped_bones"]) == sorted(TAIL_BONES)
 
     def test_procedural_rig_is_refused_clearly(self, monkeypatch, finished_run):
         import config

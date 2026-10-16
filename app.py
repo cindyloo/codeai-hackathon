@@ -35,6 +35,7 @@ from schemas import (
     ContractError,
     ProviderError,
     Rig,
+    TAIL_BONES,
     TrainConfig,
     schema_json,
     validate_clip,
@@ -144,12 +145,17 @@ def _add_avatar(rig: Rig, **kwargs):
     """
     avatar = store.add_avatar(rig, **kwargs)
     if rig.format != "glb":
+        # The stick figure: everything but the tail it doesn't draw.
+        avatar.bones = [b for b in BONES if b not in TAIL_BONES]
         return avatar
     try:
         document, binary = gltf.read_glb(rig.glb_bytes)
+        avatar.bones = [b for b in BONES if b in gltf.resolve_bones(document)]
         found = gltf.read_clips(document, binary)
     except gltf.GlbError as exc:
         log(f"[avatar] {avatar.id}: couldn't read its animations: {exc}")
+        # Bones unknown: offer what a person has rather than nothing.
+        avatar.bones = avatar.bones or [b for b in BONES if b not in TAIL_BONES]
         return avatar
 
     for raw in found:

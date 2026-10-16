@@ -139,7 +139,8 @@ export const StepPose = {
 
         <div class="panel">
           <AvatarCanvas v-if="building" :rig="state.avatar.rig"
-                        :pose="builderPreview.pose" :clip="builderPreview.clip"
+                        :pose="builderPreview.pose" :stretch="builderPreview.stretch || 0"
+                        :clip="builderPreview.clip"
                         :label="builderPreview.clip ? 'Your poses' : 'Sliders'" />
           <AvatarCanvas v-else :rig="state.avatar.rig" :clip="state.activeClip"
                         :label="state.activeClip ? state.activeClip.name : 'Waiting'" />

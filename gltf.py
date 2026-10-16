@@ -27,7 +27,13 @@ import struct
 from typing import Any
 
 from rewards import quat_mul
-from schemas import BONE_TREE, IDENTITY_QUAT, MIXAMO_BONE_MAP, OPTIONAL_BONES
+from schemas import (
+    BONE_TREE,
+    IDENTITY_QUAT,
+    MAX_STRETCH,
+    MIXAMO_BONE_MAP,
+    OPTIONAL_BONES,
+)
 
 _MAGIC = 0x46546C67          # 'glTF'
 _CHUNK_JSON = 0x4E4F534A     # 'JSON'
@@ -378,12 +384,125 @@ def pose_glb(document: dict[str, Any], pose: dict[str, list[float]],
 _FLOAT = 5126   # componentType FLOAT
 
 
+# --------------------------------------------------------------------------
+# Squash and stretch
+# --------------------------------------------------------------------------
+
+#: The node a stretch scales. It sits at the model's feet, above everything
+#: else in the scene, so scaling it squashes the whole figure onto the ground.
+STRETCH_PIVOT = "stretch_pivot"
+_STRETCH_OFFSET = "stretch_offset"
+
+
+def stretch_scale(stretch: float) -> tuple[float, float, float]:
+    """Keyframe.stretch -> a node scale: taller and thinner, volume kept."""
+    tall = 1.0 + stretch
+    wide = 1.0 / math.sqrt(tall)
+    return (wide, tall, wide)
+
+
+def _local_matrix(node: dict[str, Any]) -> list[float]:
+    """The node's local transform, column-major like glTF's `matrix`."""
+    if "matrix" in node:
+        return list(node["matrix"])
+    tx, ty, tz = node.get("translation") or (0.0, 0.0, 0.0)
+    x, y, z, w = node.get("rotation") or IDENTITY_QUAT
+    sx, sy, sz = node.get("scale") or (1.0, 1.0, 1.0)
+    return [
+        (1 - 2 * (y * y + z * z)) * sx, (2 * (x * y + z * w)) * sx, (2 * (x * z - y * w)) * sx, 0.0,
+        (2 * (x * y - z * w)) * sy, (1 - 2 * (x * x + z * z)) * sy, (2 * (y * z + x * w)) * sy, 0.0,
+        (2 * (x * z + y * w)) * sz, (2 * (y * z - x * w)) * sz, (1 - 2 * (x * x + y * y)) * sz, 0.0,
+        tx, ty, tz, 1.0,
+    ]
+
+
+def _mat_mul(a: list[float], b: list[float]) -> list[float]:
+    return [sum(a[k * 4 + r] * b[c * 4 + k] for k in range(4))
+            for c in range(4) for r in range(4)]
+
+
+def _ground_point(document: dict[str, Any]) -> tuple[float, float, float]:
+    """Where the model meets the floor: centred under it, at its lowest point.
+
+    From each mesh's POSITION bounds (which glTF requires), moved into world
+    space by the node holding the mesh. A skinned mesh's vertices are in that
+    same space at bind, so this works for rigs too.
+    """
+    nodes = document.get("nodes", [])
+    meshes = document.get("meshes", [])
+    accessors = document.get("accessors", [])
+    parents = _parents(document)
+    lo = [math.inf] * 3
+    hi = [-math.inf] * 3
+    for index, node in enumerate(nodes):
+        if "mesh" not in node:
+            continue
+        world, at = _local_matrix(node), index
+        while at in parents:
+            at = parents[at]
+            world = _mat_mul(_local_matrix(nodes[at]), world)
+        for primitive in meshes[node["mesh"]].get("primitives", []):
+            position = primitive.get("attributes", {}).get("POSITION")
+            accessor = accessors[position] if position is not None else {}
+            if "min" not in accessor or "max" not in accessor:
+                continue
+            for corner in range(8):
+                v = [accessor["max" if corner >> axis & 1 else "min"][axis]
+                     for axis in range(3)]
+                p = [sum(world[c * 4 + r] * (v[c] if c < 3 else 1.0)
+                         for c in range(4)) for r in range(3)]
+                lo = [min(a, b) for a, b in zip(lo, p)]
+                hi = [max(a, b) for a, b in zip(hi, p)]
+    if not math.isfinite(lo[1]):
+        return (0.0, 0.0, 0.0)
+    return ((lo[0] + hi[0]) / 2, lo[1], (lo[2] + hi[2]) / 2)
+
+
+def find_stretch_pivot(document: dict[str, Any]) -> int | None:
+    for index, node in enumerate(document.get("nodes", [])):
+        if node.get("name") == STRETCH_PIVOT:
+            return index
+    return None
+
+
+def ensure_stretch_pivot(document: dict[str, Any]) -> int:
+    """Index of the stretch pivot node, adding it if the file has none.
+
+    Two nodes go above the scene's roots: the pivot, placed at the ground
+    point, and an offset that cancels that placement — so at scale 1 nothing
+    moves, and scaling the pivot scales the figure about its feet. Existing
+    node indices are unchanged, so every animation and skin still points at
+    the right nodes. A file we exported before already has one, and keeps it.
+    """
+    existing = find_stretch_pivot(document)
+    if existing is not None:
+        return existing
+    nodes = document.setdefault("nodes", [])
+    scenes = document.setdefault("scenes", [{"nodes": []}])
+    scene = scenes[document.get("scene", 0)]
+    x, y, z = _ground_point(document)
+
+    offset = len(nodes)
+    nodes.append({"name": _STRETCH_OFFSET, "translation": [-x, -y, -z],
+                  "children": list(scene.get("nodes", []))})
+    pivot = len(nodes)
+    nodes.append({"name": STRETCH_PIVOT, "translation": [x, y, z],
+                  "children": [offset]})
+    scene["nodes"] = [pivot]
+    return pivot
+
+
 def add_pose_animation(document: dict[str, Any], binary: bytes,
                        keyframes: list[tuple[float, dict[str, list[float]]]],
-                       bones: dict[str, int], name: str) -> bytes:
+                       bones: dict[str, int], name: str,
+                       stretches: list[float] | None = None,
+                       pivot: int | None = None) -> bytes:
     """Bake contract-pose keyframes into a glTF animation. Returns the new BIN.
 
     One LINEAR rotation channel per mapped bone, all sharing one time accessor.
+    With a `pivot` (see ensure_stretch_pivot), also a scale channel on it from
+    `stretches`, one per keyframe; none means no stretch, which is still
+    written so this animation resets a stretch another one left behind.
     Must run while the node rotations are still at bind — every keyframe is
     retargeted against them — so call it BEFORE `pose_glb`.
     """
@@ -431,6 +550,15 @@ def add_pose_animation(document: dict[str, Any], binary: bytes,
                          "output": push(values, "VEC4", len(frames))})
         channels.append({"sampler": len(samplers) - 1,
                          "target": {"node": index, "path": "rotation"}})
+
+    if pivot is not None:
+        values = []
+        for stretch in stretches or [0.0] * len(frames):
+            values.extend(stretch_scale(stretch))
+        samplers.append({"input": time_accessor, "interpolation": "LINEAR",
+                         "output": push(values, "VEC3", len(frames))})
+        channels.append({"sampler": len(samplers) - 1,
+                         "target": {"node": pivot, "path": "scale"}})
 
     # First, because viewers autoplay animation 0 and an uploaded GLB may
     # already carry its own (a Mixamo idle, say).
@@ -498,8 +626,12 @@ def _slerp(a, b, alpha: float):
     return tuple(c / length for c in q)
 
 
+def _lerp(a, b, alpha: float):
+    return tuple(x + (y - x) * alpha for x, y in zip(a, b))
+
+
 def _sample(times: list[float], values: list[tuple], interpolation: str,
-            t: float):
+            t: float, mix=_slerp):
     if interpolation == "CUBICSPLINE":
         # Each key is (in-tangent, value, out-tangent); keep the values and
         # interpolate those linearly — close enough at our sampling rate.
@@ -514,8 +646,8 @@ def _sample(times: list[float], values: list[tuple], interpolation: str,
     if interpolation == "STEP":
         return values[i]
     span = times[i + 1] - times[i]
-    return _slerp(values[i], values[i + 1],
-                  (t - times[i]) / span if span > 0 else 0.0)
+    return mix(values[i], values[i + 1],
+               (t - times[i]) / span if span > 0 else 0.0)
 
 
 def read_clips(document: dict[str, Any], binary: bytes,
@@ -525,8 +657,9 @@ def read_clips(document: dict[str, Any], binary: bytes,
     Each frame is FK'd through the GLB's own node tree (so unmapped bones such
     as a chest still carry their children), then each contract bone's world
     rotation is turned back into a delta from bind and made local against its
-    contract parent — `pose_glb` run backwards. Only rotations come across;
-    translation (a root bob) and scale have no place in a contract pose.
+    contract parent — `pose_glb` run backwards. Rotations come across, and so
+    does a scale on our stretch pivot, as each keyframe's `stretch`; any other
+    translation (a root bob) or scale has no place in a contract clip.
 
     Reads the node rotations as bind, so the file must be at rest — which is
     how riggers and our own export leave it.
@@ -538,27 +671,38 @@ def read_clips(document: dict[str, Any], binary: bytes,
     rest_local = {i: _node_rotation(n) for i, n in enumerate(nodes)}
     parents = _parents(document)
     roots = [i for i in range(len(nodes)) if i not in parents]
+    pivot = find_stretch_pivot(document)
 
     clips = []
     for number, animation in enumerate(document.get("animations", []) or []):
         channels = {}
+        stretch_channel = None
         try:
             for channel in animation.get("channels", []):
                 target = channel.get("target", {})
-                if target.get("path") != "rotation" or "node" not in target:
+                if "node" not in target:
+                    continue
+                is_stretch = (target["node"] == pivot
+                              and target.get("path") == "scale")
+                if target.get("path") != "rotation" and not is_stretch:
                     continue
                 sampler = animation["samplers"][channel["sampler"]]
-                channels[target["node"]] = (
+                read = (
                     [t[0] for t in _read_accessor(document, binary, sampler["input"])],
                     _read_accessor(document, binary, sampler["output"]),
                     sampler.get("interpolation", "LINEAR"),
                 )
+                if is_stretch:
+                    stretch_channel = read
+                else:
+                    channels[target["node"]] = read
         except (GlbError, KeyError, IndexError, TypeError, struct.error):
             continue   # one unreadable clip shouldn't cost the others
-        if not channels:
+        if not channels and not stretch_channel:
             continue
 
-        duration = min(max(c[0][-1] for c in channels.values()), 30.0)
+        every = list(channels.values()) + ([stretch_channel] if stretch_channel else [])
+        duration = min(max(c[0][-1] for c in every), 30.0)
         count = min(int(round(duration * IMPORT_FPS)) + 1, 240)
         step = duration / (count - 1) if count > 1 else 0.0
 
@@ -583,10 +727,17 @@ def read_clips(document: dict[str, Any], binary: bytes,
                 q = (quat_mul(_conjugate(deltas[parent]), deltas[bone])
                      if parent in deltas else deltas[bone])
                 pose[bone] = [round(c, 5) for c in q]
-            keyframes.append({"t": round(t, 4), "pose": pose})
+            keyframe = {"t": round(t, 4), "pose": pose}
+            if stretch_channel:
+                scale = _sample(*stretch_channel, t, mix=_lerp)
+                stretch = round(scale[1] - 1.0, 4)
+                if stretch:
+                    keyframe["stretch"] = max(-MAX_STRETCH, min(MAX_STRETCH, stretch))
+            keyframes.append(keyframe)
 
         if all(abs(q[3]) > 0.9999 for frame in keyframes
-               for q in frame["pose"].values()):
+               for q in frame["pose"].values()) and not any(
+                   frame.get("stretch") for frame in keyframes):
             continue   # drives nothing we can show (e.g. only fingers)
 
         clips.append({

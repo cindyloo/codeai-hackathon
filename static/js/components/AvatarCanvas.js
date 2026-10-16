@@ -8,6 +8,7 @@ export const AvatarCanvas = {
   props: {
     rig: { type: Object, required: true },
     pose: { type: Object, default: null },     // static pose to hold
+    stretch: { type: Number, default: 0 },     // squash/stretch with that pose
     clip: { type: Object, default: null },     // clip to play on a loop
     ghostPose: { type: Object, default: null },// translucent comparison figure
     jointHeat: { type: Object, default: null },// bone -> 0..1 error, tints limbs
@@ -23,7 +24,10 @@ export const AvatarCanvas = {
       await viewport.setRig(props.rig);
       viewport.setSpeed(props.speed);
       if (props.clip) viewport.playClip(props.clip);
-      else if (props.pose) viewport.applyPose(props.pose);
+      else if (props.pose) {
+        viewport.applyPose(props.pose);
+        viewport.setStretch(props.stretch);
+      }
       if (props.ghostPose) viewport.setGhostPose(props.ghostPose);
       if (props.jointHeat) viewport.setJointHeat(props.jointHeat);
     });
@@ -36,11 +40,17 @@ export const AvatarCanvas = {
     watch(() => props.clip, (clip) => {
       viewport?.playClip(clip);
       // Dropping back from a clip to a pose: show the pose again.
-      if (!clip && props.pose) viewport?.applyPose(props.pose);
+      if (!clip && props.pose) {
+        viewport?.applyPose(props.pose);
+        viewport?.setStretch(props.stretch);
+      }
     });
     watch(() => props.pose, (pose) => {
       // A clip is animating; a static pose would fight it for control.
       if (pose && !props.clip) viewport?.applyPose(pose);
+    });
+    watch(() => props.stretch, (stretch) => {
+      if (!props.clip) viewport?.setStretch(stretch);
     });
     watch(() => props.speed, (speed) => viewport?.setSpeed(speed));
     watch(() => props.ghostPose, (pose) => viewport?.setGhostPose(pose));

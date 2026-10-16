@@ -37,9 +37,19 @@ from training import TrainingRun
 
 pytestmark = pytest.mark.real
 
-#: The broccoli (arms, idle/walk/wave) and the tomato (no arm joints).
+#: The broccoli (arms, idle/walk/wave), the tomato (no arm joints), the
+#: pufferfish (fins as arms, no legs) and a bee (the flying skeleton: wings
+#: as arms, no pelvis, no legs).
 RIGS = [r.strip() for r in os.environ.get(
-    "REAL_TEST_RIGS", "da008649,60964d1d").split(",") if r.strip()]
+    "REAL_TEST_RIGS", "da008649,60964d1d,865fee5d,cea1a599").split(",") if r.strip()]
+
+#: Which limbs each known rig has, as the Teach sliders should show them.
+EXPECTED_LIMBS = {
+    "da008649": {"arms": True, "legs": True, "tail": False},    # broccoli
+    "60964d1d": {"arms": False, "legs": True, "tail": False},   # tomato
+    "865fee5d": {"arms": True, "legs": False, "tail": True},    # pufferfish
+    "cea1a599": {"arms": True, "legs": False, "tail": False},   # bee
+}
 
 
 def _get(path: str) -> bytes:
@@ -95,20 +105,38 @@ def test_joints_rename_to_a_valid_contract_rig(rig_glb):
     assert set(BONES) - set(bones) <= OPTIONAL_BONES
 
 
+def test_the_avatar_lists_the_bones_its_model_has(client, rig_glb):
+    rig_id, raw = rig_glb
+    if rig_id not in EXPECTED_LIMBS:
+        pytest.skip(f"no expectation written down for {rig_id}")
+    avatar = client.post("/api/avatars/glb",
+                         data={"glb": (io.BytesIO(raw), f"{rig_id}.glb")}).get_json()
+    bones = set(avatar["bones"])
+
+    assert {"hips", "spine", "neck", "head"} <= bones
+    limbs = {"arms": "L_shoulder", "legs": "L_hip", "tail": "tail"}
+    for limb, has in EXPECTED_LIMBS[rig_id].items():
+        assert (limbs[limb] in bones) == has, f"{rig_id}: {limb} {sorted(bones)}"
+
+
 def test_its_baked_clips_import_as_moves_that_move(rig_glb):
     rig_id, raw = rig_glb
     document, binary = gltf.read_glb(rewrite_glb_joint_names(raw, verify=False))
     clips = {c["name"].lower(): c for c in gltf.read_clips(document, binary)}
 
-    assert "walk" in clips, f"{rig_id} has no walk clip: {sorted(clips)}"
-    walk = clips["walk"]
-    # A walk swings both legs, visibly.
-    for bone in ("L_hip", "R_hip"):
-        assert _swing(walk, bone) > 15, f"{rig_id} walk barely moves {bone}"
+    assert clips, f"{rig_id} came with no moves"
+    # Something that walks bakes a walk that swings both legs, visibly. A
+    # fish has no legs, and what seg_server bakes for it varies by run (its
+    # pufferfish has come back with fold/idle/walk/wave and with idle/wave).
+    if "L_hip" in next(iter(clips.values()))["keyframes"][0]["pose"]:
+        assert "walk" in clips, f"{rig_id} has no walk clip: {sorted(clips)}"
+        for bone in ("L_hip", "R_hip"):
+            assert _swing(clips["walk"], bone) > 15, f"{rig_id} walk barely moves {bone}"
 
     if "wave" in clips:
         wave = clips["wave"]
-        assert max(_swing(wave, "L_shoulder"), _swing(wave, "R_shoulder")) > 30
+        # A fish waves a fin through ~29°, an arm much further.
+        assert max(_swing(wave, "L_shoulder"), _swing(wave, "R_shoulder")) > 20
 
 
 def test_sideloading_it_gives_an_avatar_with_its_moves(client, rig_glb):
@@ -119,7 +147,7 @@ def test_sideloading_it_gives_an_avatar_with_its_moves(client, rig_glb):
     avatar = response.get_json()
 
     names = {c["name"] for c in avatar["clips"]}
-    assert "Walk" in names
+    assert names
     behaviours = client.get(
         f"/api/behaviours?avatar_id={avatar['id']}").get_json()["behaviours"]
     assert {b["name"] for b in behaviours if b["source"] == "model"} == names
@@ -146,4 +174,6 @@ def test_a_learned_move_exports_into_it_and_comes_back(client, rig_glb):
 
     # The learned move leads; the rig's own clips survive behind it.
     assert names[0] == "Jump (learned)"
-    assert "walk" in [n.lower() for n in names[1:]]
+    own = [c["name"] for c in gltf.read_clips(*gltf.read_glb(
+        rewrite_glb_joint_names(raw, verify=False)))]
+    assert [n.lower() for n in names[1:]] == [n.lower() for n in own]

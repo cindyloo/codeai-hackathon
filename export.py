@@ -136,8 +136,8 @@ def _open_avatar_glb(avatar):
     return document, binary, bones
 
 
-def clip_keyframes(clip) -> list[tuple[float, dict[str, list[float]]]]:
-    """A clip as animation keyframes, every bone filled in.
+def clip_keyframes(clip) -> list[tuple[float, dict[str, list[float]], float]]:
+    """A clip as (t, pose, stretch) animation keyframes, every bone filled in.
 
     A single pose (what training saves) becomes T-pose -> pose -> hold ->
     T-pose on ANIMATION_TIMING, as the browser plays it (performableClip in
@@ -147,9 +147,10 @@ def clip_keyframes(clip) -> list[tuple[float, dict[str, list[float]]]]:
         return {**REST_POSE, **pose}
 
     if len(clip.keyframes) == 1:
-        poses = {"start": REST_POSE, "end": full(clip.keyframes[0].pose)}
-        return [(t, poses[which]) for which, t in ANIMATION_TIMING]
-    return [(k.t, full(k.pose)) for k in clip.keyframes]
+        only = clip.keyframes[0]
+        frames = {"start": (REST_POSE, 0.0), "end": (full(only.pose), only.stretch)}
+        return [(t, *frames[which]) for which, t in ANIMATION_TIMING]
+    return [(k.t, full(k.pose), k.stretch) for k in clip.keyframes]
 
 
 def build_avatar_glb(avatar, behaviours) -> tuple[bytes, dict[str, Any]]:
@@ -175,10 +176,18 @@ def build_avatar_glb(avatar, behaviours) -> tuple[bytes, dict[str, Any]]:
         taken.add(name)
         baked.append((name, behaviour.clip))
 
+    # A move that stretches needs the pivot; once there is one, every move we
+    # bake drives it, so none inherits a stretch another left behind.
+    pivot = gltf.find_stretch_pivot(document)
+    if pivot is None and any(k.stretch for _name, clip in baked for k in clip.keyframes):
+        pivot = gltf.ensure_stretch_pivot(document)
+
     # Each new animation goes first, so bake last to first.
     for name, clip in reversed(baked):
+        frames = clip_keyframes(clip)
         binary = gltf.add_pose_animation(
-            document, binary, clip_keyframes(clip), bones, name=name)
+            document, binary, [(t, pose) for t, pose, _s in frames], bones,
+            name=name, stretches=[s for _t, _p, s in frames], pivot=pivot)
 
     document["animations"] += kept
     summary = {
@@ -209,8 +218,11 @@ def build_glb(run, avatar, clip) -> tuple[bytes, dict[str, Any]]:
     # doesn't give two moves called "Walk" when the rig brought its own.
     name = f"{clip.name} (learned)"
     keyframes = [(t, payload["poses"][which]) for which, t in ANIMATION_TIMING]
+    # A learned move never stretches, but a file that already has a stretch
+    # pivot gets told so, or it would play on in another move's stretch.
     binary = gltf.add_pose_animation(document, binary, keyframes, bones,
-                                     name=name)
+                                     name=name,
+                                     pivot=gltf.find_stretch_pivot(document))
 
     # Record what actually moved. A rig missing bones still exports, but the
     # consumer should be able to tell which joints were driven and which were
