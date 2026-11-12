@@ -319,6 +319,7 @@ def test_async_mesh_and_rig_tasks_are_polled():
         ("/rig/status/rig-1", {"state": "injecting_keyframes", "progress": 40}),
         ("/rig/status/rig-1", {"state": "visualizing", "progress": 50}),
         ("/rig/status/rig-1", {"state": "rigging_blender", "progress": 60}),
+        ("/rig/status/rig-1", {"state": "exporting_usdz", "progress": 85}),
         ("/rig/status/rig-1", {"state": "finalizing", "progress": 90}),
         ("/rig/status/rig-1", {"state": "succeeded",
                         "result": {"download_url": "/files/avatar.glb"}}),
@@ -329,7 +330,7 @@ def test_async_mesh_and_rig_tasks_are_polled():
     rig = rigger.rig(b"png", "image/png", lambda f, m: seen.append((f, m)))
 
     assert rig.glb_bytes
-    assert sum(request.method == "GET" for request in opener.requests) == 13
+    assert sum(request.method == "GET" for request in opener.requests) == 14
     assert any(0.26 < fraction <= 0.52 for fraction, _ in seen)
     assert any(0.70 < fraction <= 0.90 for fraction, _ in seen)
 

@@ -26,10 +26,10 @@ _log = logging.getLogger(__name__)
 _MAX_JSON_BYTES = 2 * 1024 * 1024
 _MAX_GLB_BYTES = 100 * 1024 * 1024
 _PENDING_STATUSES = {
-    "accepted", "created", "decimating", "downloading", "finalizing",
-    "in_progress", "inferring_skeleton", "injecting_keyframes", "meshy",
-    "pending", "processing", "queued", "rigging", "rigging_blender", "running",
-    "started", "uploading", "visualizing",
+    "accepted", "created", "decimating", "downloading", "exporting_usdz",
+    "finalizing", "in_progress", "inferring_skeleton", "injecting_keyframes",
+    "meshy", "pending", "processing", "queued", "rigging", "rigging_blender",
+    "running", "started", "uploading", "visualizing",
 }
 _SUCCESS_STATUSES = {"complete", "completed", "done", "ok", "success", "succeeded"}
 _FAILED_STATUSES = {"cancelled", "canceled", "error", "failed", "failure"}
